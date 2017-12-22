@@ -160,6 +160,8 @@ private:
   std::fstream FileStream;
   bool WriteMode;
   unsigned Version;
+  //bool Valid;
+  std::string LastError;
 
   // Holds the the version, free block table.
   // Therefore, we always keep it in memory.
@@ -218,6 +220,11 @@ public:
     WriteMode = true;
   }
   void endWrite();
+
+  bool isValid() const { return !FileStream.bad(); }
+  bool isInvalid() const { return !isValid(); }
+  explicit operator bool() const { return isValid(); }
+  explicit operator ClangdIndexDataPieceRef() const { return HeaderDataPiece; }
 };
 
 template <class T, class... Args>

@@ -37,7 +37,8 @@ ClangdIndexDataStorage::ClangdIndexDataStorage(const std::string &FilePath,
   }
 
   if (!FileStream.is_open()) {
-    llvm::errs() << "Could not open index file" << "\n";
+    LastError = "Could not open index file";
+    return;
   }
 
   HeaderDataPiece = std::make_shared<ClangdIndexDataPiece>(*this, 0);
@@ -45,8 +46,12 @@ ClangdIndexDataStorage::ClangdIndexDataStorage(const std::string &FilePath,
   HeaderDataPiece->CanBeReleased = false;
 
   FileStream.seekg(0, std::ios::end);
-
   std::streampos FileSize = FileStream.tellg();
+  if (FileStream.bad()) {
+    LastError = "Could not determine size of index file";
+    return;
+  }
+
   if (FileSize >= ClangdIndexDataPiece::PIECE_SIZE) {
     size_t NbPiecesInFile = FileSize / ClangdIndexDataPiece::PIECE_SIZE;
     HeaderDataPiece->read();
