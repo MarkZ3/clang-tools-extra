@@ -659,6 +659,7 @@ void ClangdIndex::foreachSymbols(const USR &Usr,
   SymbolBTree.accept(Visitor);
   auto Syms = Visitor.getResult();
   for (auto &Sym : Syms) {
+
     if (!Receiver(*Sym))
       break;
   }

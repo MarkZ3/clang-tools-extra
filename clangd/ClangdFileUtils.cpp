@@ -10,10 +10,10 @@ StringRef SourceExtensions[] = {".cpp", ".c", ".cc", ".cxx",
 StringRef HeaderExtensions[] = {".h", ".hh", ".hpp", ".hxx", ".inc"};
 
 llvm::ArrayRef<StringRef> getSourceExtensions() {
-  return SourceExtensions;
+  return (llvm::ArrayRef<llvm::StringRef>)SourceExtensions;
 }
 llvm::ArrayRef<StringRef> getHeaderExtensions() {
-  return HeaderExtensions;
+  return (llvm::ArrayRef<llvm::StringRef>)HeaderExtensions;
 }
 
 bool isSourceFilePath(PathRef Path) {

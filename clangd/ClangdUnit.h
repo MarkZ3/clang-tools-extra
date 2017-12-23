@@ -271,6 +271,9 @@ findDocumentHighlights(const Context &Ctx, ParsedAST &AST, Position Pos);
 std::vector<Location> findReferences(const Context &Ctx, ParsedAST &AST, Position Pos,
     bool IncludeDeclaration, ClangdIndexDataProvider &IndexDataProvider);
 
+std::vector<CodeLens>
+findCodeLens(ParsedAST &AST, PathRef File, ClangdIndexDataProvider &IndexDataProvider);
+
 /// For testing/debugging purposes. Note that this method deserializes all
 /// unserialized Decls, so use with care.
 void dumpAST(ParsedAST &AST, llvm::raw_ostream &OS);

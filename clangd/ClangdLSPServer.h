@@ -66,6 +66,7 @@ private:
                             DocumentRangeFormattingParams &Params) override;
   void onDocumentFormatting(Ctx C, DocumentFormattingParams &Params) override;
   void onCodeAction(Ctx C, CodeActionParams &Params) override;
+  void onCodeLens(Ctx C, CodeLensParams &Params) override;
   void onCompletion(Ctx C, TextDocumentPositionParams &Params) override;
   void onSignatureHelp(Ctx C, TextDocumentPositionParams &Params) override;
   void onGoToDefinition(Ctx C, TextDocumentPositionParams &Params) override;
@@ -76,7 +77,6 @@ private:
   void onWorkspaceSymbol(Ctx C, WorkspaceSymbolParams &Params) override;
   void onRename(Ctx C, RenameParams &Parames) override;
   void onReferences(Ctx C, ReferenceParams &Params) override;
-
   std::vector<TextEdit> getFixIts(StringRef File, const clangd::Diagnostic &D);
 
   JSONOutput &Out;

@@ -57,9 +57,11 @@ public:
   virtual void onCommand(Ctx C, ExecuteCommandParams &Params) = 0;
   virtual void onWorkspaceSymbol(Ctx C, WorkspaceSymbolParams &Params) = 0;
   virtual void onRename(Ctx C, RenameParams &Parames) = 0;
+  virtual void onReferences(Ctx C, ReferenceParams &Params) = 0;
   virtual void onDocumentHighlight(Ctx C,
                                    TextDocumentPositionParams &Params) = 0;
-  virtual void onReferences(Ctx C, ReferenceParams &Params) = 0;
+  virtual void onCodeLens(Ctx C,
+                          CodeLensParams &Params) = 0;
 };
 
 void registerCallbackHandlers(JSONRPCDispatcher &Dispatcher, JSONOutput &Out,

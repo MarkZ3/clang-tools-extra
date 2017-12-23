@@ -44,12 +44,18 @@ struct HandlerRegisterer {
   ProtocolCallbacks *Callbacks;
 };
 
+int foo() {
+    return 5;
+}
+
 } // namespace
 
 void clangd::registerCallbackHandlers(JSONRPCDispatcher &Dispatcher,
                                       JSONOutput &Out,
                                       ProtocolCallbacks &Callbacks) {
   HandlerRegisterer Register{Dispatcher, &Out, &Callbacks};
+
+  foo();
 
   Register("initialize", &ProtocolCallbacks::onInitialize);
   Register("shutdown", &ProtocolCallbacks::onShutdown);
@@ -71,8 +77,12 @@ void clangd::registerCallbackHandlers(JSONRPCDispatcher &Dispatcher,
   Register("textDocument/rename", &ProtocolCallbacks::onRename);
   Register("workspace/didChangeWatchedFiles", &ProtocolCallbacks::onFileEvent);
   Register("workspace/executeCommand", &ProtocolCallbacks::onCommand);
-  Register("textDocument/documentHighlight",
-           &ProtocolCallbacks::onDocumentHighlight);
   Register("workspace/symbol", &ProtocolCallbacks::onWorkspaceSymbol);
   Register("textDocument/references", &ProtocolCallbacks::onReferences);
+  Register("textDocument/documentHighlight",
+           &ProtocolCallbacks::onDocumentHighlight);
+  Register("textDocument/codeLens",
+           &ProtocolCallbacks::onCodeLens);
+
+  foo();
 }

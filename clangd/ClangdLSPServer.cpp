@@ -11,6 +11,7 @@
 #include "JSONRPCDispatcher.h"
 
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/Path.h"
 
 using namespace clang::clangd;
 using namespace clang;
@@ -77,10 +78,18 @@ void ClangdLSPServer::onInitialize(Ctx C, InitializeParams &Params) {
             {"referencesProvider", true},
             {"workspaceSymbolProvider", true},
         }}}});
+  std::vector<Path> ExclusionList;
+
+  if (Params.initializationOptions.hasValue()) {
+    for (auto CurrentPath : Params.initializationOptions.getValue()) {
+      ExclusionList.push_back(CurrentPath);
+    }
+  }
+
   if (Params.rootUri && !Params.rootUri->file.empty())
-    Server.setRootPath(Params.rootUri->file);
+    Server.setRootPath(Params.rootUri->file, ExclusionList);
   else if (Params.rootPath && !Params.rootPath->empty())
-    Server.setRootPath(*Params.rootPath);
+    Server.setRootPath(*Params.rootPath, ExclusionList);
 }
 
 void ClangdLSPServer::onShutdown(Ctx C, ShutdownParams &Params) {
@@ -142,7 +151,8 @@ void ClangdLSPServer::onCommand(Ctx C, ExecuteCommandParams &Params) {
     // would reply success/failure to the original RPC.
     call(C, "workspace/applyEdit", ApplyEdit);
   } else if (Params.command == ExecuteCommandParams::CLANGD_REINDEX_COMMAND) {
-    Server.reindex();
+    std::vector<Path> EmptyList = {};
+    Server.reindex(EmptyList);
   } else if (Params.command == ExecuteCommandParams::CLANGD_DUMPINCLUDEDBY_COMMAND && Params.textDocument) {
     Server.dumpIncludedBy(Params.textDocument->uri);
   } else if (Params.command == ExecuteCommandParams::CLANGD_DUMPINCLUSIONS_COMMAND && Params.textDocument) {
@@ -162,9 +172,7 @@ void ClangdLSPServer::onCommand(Ctx C, ExecuteCommandParams &Params) {
 void ClangdLSPServer::onWorkspaceSymbol(Ctx C, WorkspaceSymbolParams &Params) {
   auto Items = Server.onWorkspaceSymbol(Params.query);
   if (!Items)
-    return replyError(C, ErrorCode::InvalidParams,
-                        llvm::toString(Items.takeError()));
-  reply(C, json::ary(*Items));
+    reply(C, json::ary(*Items));
 }
 
 void ClangdLSPServer::onRename(Ctx C, RenameParams &Params) {
@@ -316,6 +324,19 @@ void ClangdLSPServer::onReferences(Ctx C, ReferenceParams &Params) {
     return replyError(C, ErrorCode::InvalidParams,
                         llvm::toString(Items.takeError()));
   reply(C, json::ary(Items->Value));
+}
+
+void ClangdLSPServer::onCodeLens(Ctx C,
+                                  CodeLensParams &Params) {
+  auto Lens = Server.findCodeLens(Params.textDocument.uri.file);
+
+  if (!Lens) {
+    return replyError(C, ErrorCode::InternalError,
+        llvm::toString(Lens.takeError()));
+    return;
+  }
+  reply(C, json::ary(Lens->Value));
+
 }
 
 ClangdLSPServer::ClangdLSPServer(JSONOutput &Out, unsigned AsyncThreadsCount,

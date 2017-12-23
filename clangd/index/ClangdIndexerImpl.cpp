@@ -40,13 +40,13 @@ class TranslationUnitToBeIndexedCollector {
   ClangdIndex &Index;
   std::vector<std::string> PathsToBeIndexed;
   std::unordered_set<std::string> PathsToBeIndexedSet;
+  std::string RootPath;
 
 public:
-  TranslationUnitToBeIndexedCollector(bool CheckModified, ClangdIndex &Index) : CheckModified(CheckModified), Index(Index) {
-  }
+  TranslationUnitToBeIndexedCollector(bool CheckModified, ClangdIndex &Index, Path RootPath) : CheckModified(CheckModified), Index(Index), RootPath(RootPath) {}
 
-  void visitPath(StringRef Path) {
-    llvm::sys::fs::directory_entry Entry(Path);
+  void visitPath(StringRef FilePath, std::vector<Path> ExclusionList) {
+    llvm::sys::fs::directory_entry Entry(FilePath);
     auto Status = Entry.status();
     if (!Status) {
       llvm::errs() << " Cannot stat file. Nothing to do. " << "\n";
@@ -54,9 +54,9 @@ public:
     }
     llvm::sys::fs::file_type Type = Status->type();
     if (Type == llvm::sys::fs::file_type::directory_file)
-      visitFolder(Path, CheckModified);
+      visitFolder(FilePath, CheckModified, ExclusionList);
     else
-      visitFile(Entry, CheckModified);
+      visitFile(Entry, CheckModified, ExclusionList);
   }
 
   std::vector<std::string> takePaths() {
@@ -64,7 +64,6 @@ public:
   }
 
 private:
-
   void addFile(StringRef File) {
     if (PathsToBeIndexedSet.find(File) == PathsToBeIndexedSet.end()) {
       PathsToBeIndexedSet.insert(File);
@@ -72,7 +71,7 @@ private:
     }
   }
 
-  void visitFile(llvm::sys::fs::directory_entry FileEntry, bool CheckModified) {
+  void visitFile(llvm::sys::fs::directory_entry FileEntry, bool CheckModified, std::vector<Path> ExclusionList) {
     StringRef File = FileEntry.path();
     assert(!File.empty());
     llvm::errs() << llvm::formatv("Visiting {0}\n", File.str());
@@ -84,6 +83,32 @@ private:
 
     if (!IsSourceFilePath && !IsHeaderFilePath) {
       llvm::errs() << " Not a C-family file. Nothing to do. " << "\n";
+      return;
+    }
+
+    bool Found = false;
+    if (!ExclusionList.empty()) {
+      unsigned I = 0;
+      while (!Found && I < ExclusionList.size()) {
+
+        if (llvm::sys::path::is_absolute(ExclusionList[I])) {
+          std::string EndOfPath = ExclusionList[I].substr(
+              RootPath.length(), ExclusionList[I].length() - 1);
+          std::string MergePath = RootPath + EndOfPath;
+          if (File == MergePath)
+            Found = true;
+
+        } else {
+          std::string MergePath = RootPath + "/" + ExclusionList[I];
+          if (File == MergePath)
+            Found = true;
+        }
+        I++;
+      }
+    }
+
+    if (Found) {
+      llvm::errs() << " File is excluded from indexing. " << "\n";
       return;
     }
 
@@ -107,15 +132,16 @@ private:
                 Collector(Collector) {
           }
           virtual ClangdIndexFile::NodeVisitResult VisitDependent(ClangdIndexFile& File) override {
-            StringRef Path = File.getPath();
-            llvm::errs() << " Considering dependent : " << Path << "\n";
-            llvm::sys::fs::directory_entry Entry(Path);
+            StringRef FilePath = File.getPath();
+            llvm::errs() << " Considering dependent : " << FilePath << "\n";
+            llvm::sys::fs::directory_entry Entry(FilePath);
             auto Status = Entry.status();
             if (!Status) {
               llvm::errs() << " Cannot stat file. Nothing to do. " << "\n";
               return ClangdIndexFile::NodeVisitResult::CONTINUE;
             }
-            Collector.visitFile(Entry, false);
+            std::vector<Path> EmptyList;
+            Collector.visitFile(Entry, false, EmptyList);
             return ClangdIndexFile::NodeVisitResult::CONTINUE;
           }
         };
@@ -138,7 +164,7 @@ private:
       addFile(File);
   }
 
-  void visitFolder(StringRef Folder, bool CheckModified) {
+  void visitFolder(StringRef Folder, bool CheckModified, std::vector<Path> ExclusionList) {
     assert(!Folder.empty());
     std::error_code EC;
     for (llvm::sys::fs::directory_iterator I(Folder.str(), EC), E; I != E;
@@ -150,10 +176,38 @@ private:
       if (!Status)
         continue;
       llvm::sys::fs::file_type Type = Status->type();
+
+      bool Found = false;
+      if (!ExclusionList.empty()) {
+        unsigned Index = 0;
+        while (!Found && Index < ExclusionList.size()) {
+          if (llvm::sys::path::is_absolute(ExclusionList[Index]) &&
+              ExclusionList[Index].find(RootPath) == 0) {
+            std::string EndOfPath = ExclusionList[Index].substr(
+                RootPath.length(), ExclusionList[Index].length() - 1);
+            std::string MergePath = RootPath + EndOfPath;
+            if (Folder == MergePath)
+              Found = true;
+
+          } else {
+            std::string MergePath = RootPath + "/" + ExclusionList[Index];
+            if (Folder == MergePath)
+              Found = true;
+          }
+          Index++;
+        }
+      }
+
+      if (Found) {
+        llvm::errs() << " Folder is excluded from indexing. "
+                     << "\n";
+        return;
+      }
+
       if (Type == llvm::sys::fs::file_type::directory_file)
-        visitFolder(Entry.path(), CheckModified);
+        visitFolder(Entry.path(), CheckModified, ExclusionList);
       else
-        visitFile(Entry, CheckModified);
+        visitFile(Entry, CheckModified, ExclusionList);
     }
   }
 
@@ -244,14 +298,16 @@ void handleInclusions(ASTUnit &Unit, ClangdIndexFile &IndexFile, ClangdIndex &In
     }
   }
 }
-}
 
-ClangdIndexerImpl::ClangdIndexerImpl(std::string RootPath, GlobalCompilationDatabase &CDB) :
-    RootPath(RootPath), CDB(CDB) {
+} // namespace
+
+ClangdIndexerImpl::ClangdIndexerImpl(std::string RootPath, GlobalCompilationDatabase &CDB, std::vector<Path> ExclusionList) : RootPath(RootPath), CDB(CDB) {
   assert(!RootPath.empty());
   if (RootPath.empty())
     return;
 
+  if (!ExclusionList.empty())
+    setExclusionList(ExclusionList);
   SmallString<32> Filename(RootPath);
   llvm::sys::path::append(Filename, "clangd.index");
   // TODO, check version, etc
@@ -266,8 +322,8 @@ void ClangdIndexerImpl::onFileEvent(FileEvent Event) {
   case FileChangeType::Created:
   case FileChangeType::Changed:
   case FileChangeType::Deleted:
-    TranslationUnitToBeIndexedCollector C(true, *Index);
-    C.visitPath(Event.Path);
+    TranslationUnitToBeIndexedCollector C(true, *Index, RootPath);
+    C.visitPath(Event.Path, ExclusionList);
     auto FilesToIndex = C.takePaths();
 
     if (Event.type == FileChangeType::Deleted) {
@@ -395,8 +451,8 @@ void ClangdIndexerImpl::indexRoot() {
   auto IndexTotalTimer = llvm::Timer("index time", "Indexing Total Time");
   IndexTotalTimer.startTimer();
 
-  TranslationUnitToBeIndexedCollector C(!IsFromScratch, *Index);
-  C.visitPath(RootPath);
+  TranslationUnitToBeIndexedCollector C(!IsFromScratch, *Index, RootPath);
+  C.visitPath(RootPath, ExclusionList);
   auto FilesToIndex = C.takePaths();
   indexFiles(FilesToIndex);
   IndexTotalTimer.stopTimer();
@@ -489,18 +545,17 @@ public:
   }
 
   void foreachOccurrence(llvm::Optional<index::SymbolRoleSet> RolesFilter, llvm::function_ref<bool(ClangdIndexDataOccurrence&)> Receiver) override {
-    Symbol.foreachOccurrence(RolesFilter, [&Receiver](ClangdIndexOccurrence &Occurrence) {
-      if (ClangdIndexDefinitionOccurrence * DefOccurrence = dyn_cast<ClangdIndexDefinitionOccurrence>(&Occurrence)) {
-        ClangdIndexDataDefinitionOccurrenceAdapter DataOccurrence(*DefOccurrence);
-        return Receiver(static_cast<ClangdIndexDataDefinitionOccurrence&>(DataOccurrence));
-      } else {
-        ClangdIndexDataOccurrenceAdapter DataOccurrence(Occurrence);
-        return Receiver(DataOccurrence);
-      }
-    });
-  }
+      Symbol.foreachOccurrence(RolesFilter, [&Receiver](ClangdIndexOccurrence &Occurrence) {
+        if (ClangdIndexDefinitionOccurrence * DefOccurrence = dyn_cast<ClangdIndexDefinitionOccurrence>(&Occurrence)) {
+          ClangdIndexDataDefinitionOccurrenceAdapter DataOccurrence(*DefOccurrence);
+          return Receiver(static_cast<ClangdIndexDataDefinitionOccurrence&>(DataOccurrence));
+        } else {
+          ClangdIndexDataOccurrenceAdapter DataOccurrence(Occurrence);
+          return Receiver(DataOccurrence);
+        }
+      });
+    }
 };
-
 }
 
 void ClangdIndexerImpl::foreachSymbols(StringRef Query, llvm::function_ref<bool(ClangdIndexDataSymbol&)> Receiver) {

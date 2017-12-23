@@ -173,7 +173,7 @@ ClangdServer::ClangdServer(GlobalCompilationDatabase &CDB,
       StorePreamblesInMemory(StorePreamblesInMemory),
       WorkScheduler(AsyncThreadsCount) {}
 
-void ClangdServer::setRootPath(PathRef RootPath) {
+void ClangdServer::setRootPath(PathRef RootPath, std::vector<Path> ExclusionList) {
   std::string NewRootPath = llvm::sys::path::convert_to_slash(
       RootPath, llvm::sys::path::Style::posix);
   SmallString<256> RootPathRemoveDots = StringRef(NewRootPath);
@@ -185,7 +185,7 @@ void ClangdServer::setRootPath(PathRef RootPath) {
     return;
 
   assert (!Indexer);
-  auto ClangIndexer = std::make_shared<ClangdIndexerImpl>(RootPath.str(), CDB);
+  auto ClangIndexer = std::make_shared<ClangdIndexerImpl>(RootPath.str(), CDB, ExclusionList);
   Indexer = ClangIndexer;
   IndexDataProvider = ClangIndexer;
   assert(Indexer && IndexDataProvider);
@@ -453,7 +453,7 @@ ClangdServer::findDefinitions(const Context &Ctx, PathRef File, Position Pos) {
   Resources->getAST().get()->runUnderLock([this, Pos, &Result, &Ctx](ParsedAST *AST) {
     if (!AST)
       return;
-    Result = clangd::findDefinitions(Ctx, *AST, Pos, *IndexDataProvider);
+  Result = clangd::findDefinitions(Ctx, *AST, Pos, *IndexDataProvider);
   });
   return make_tagged(std::move(Result), TaggedFS.Tag);
 }
@@ -544,6 +544,39 @@ ClangdServer::findDocumentHighlights(const Context &Ctx, PathRef File,
     return std::move(*Err);
   return make_tagged(Result, TaggedFS.Tag);
 }
+
+llvm::Expected<Tagged<std::vector<CodeLens>>>
+ClangdServer::findCodeLens(PathRef File) {
+  auto FileContents = DraftMgr.getDraft(File);
+  if (!FileContents.Draft)
+    return llvm::make_error<llvm::StringError>(
+        "findCodeLens called on non-added file",
+        llvm::errc::invalid_argument);
+
+  auto TaggedFS = FSProvider.getTaggedFileSystem(File);
+
+  std::shared_ptr<CppFile> Resources = Units.getFile(File);
+  if (!Resources)
+    return llvm::make_error<llvm::StringError>(
+        "findCodeLens called on non-added file",
+        llvm::errc::invalid_argument);
+
+  std::vector<CodeLens> Result;
+  llvm::Optional<llvm::Error> Err;
+  Resources->getAST().get()->runUnderLock([this, File, &Err, &Result](ParsedAST *AST) {
+    if (!AST) {
+      Err = llvm::make_error<llvm::StringError>("Invalid AST",
+                                                llvm::errc::invalid_argument);
+      return;
+    }
+    Result = clangd::findCodeLens(*AST, File, *IndexDataProvider);
+  });
+
+  if (Err)
+    return std::move(*Err);
+  return make_tagged(Result, TaggedFS.Tag);
+}
+
 
 std::future<Context> ClangdServer::scheduleReparseAndDiags(
     Context Ctx, PathRef File, VersionedDraft Contents,
@@ -741,6 +774,17 @@ ClangdServer::onWorkspaceSymbol(StringRef Query) {
   IntrusiveRefCntPtr<DiagnosticsEngine> DE(CompilerInstance::createDiagnostics(new DiagnosticOptions));
   SourceManager TempSM(*DE, FM);
 
+  IndexDataProvider->foreachSymbols(Query, [&Result, &TempSM](ClangdIndexDataSymbol &Sym) {
+    USR Usr(Sym.getUsr());
+    Sym.foreachOccurrence(static_cast<index::SymbolRoleSet>(index::SymbolRole::Definition), [&Result, &TempSM, &Sym](ClangdIndexDataOccurrence &Occurrence) {
+      auto L = getLocation(TempSM, Occurrence.getPath(), Occurrence.getStartOffset(TempSM), Occurrence.getEndOffset(TempSM));
+      if (L)
+        Result.push_back({Sym.getName(), indexSymbolKindToSymbolKind(Sym.getKind()), *L, Sym.getQualifier()});
+      return true;
+    });
+    return true;
+  });
+
   const unsigned int MAX_WORKSPACE_SYMBOLS = 1000;
   unsigned NumSymbols = 0;
   IndexDataProvider->foreachSymbols(Query, [&NumSymbols, &Result, &TempSM](ClangdIndexDataSymbol &Sym) {
@@ -790,7 +834,7 @@ ClangdServer::findReferences(const Context &Ctx, PathRef File, Position Pos, boo
   return make_tagged(std::move(Result), TaggedFS.Tag);
 }
 
-void ClangdServer::reindex() {
+void ClangdServer::reindex(std::vector<Path> ExclusionList) {
   if (!RootPath)
     return;
 

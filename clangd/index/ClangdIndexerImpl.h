@@ -2,6 +2,7 @@
 #define TOOLS_CLANG_TOOLS_EXTRA_CLANGD_INDEX_CLANGDINDEXERIMPL_H_
 
 #include "ClangdIndexer.h"
+#include "../Path.h"
 #include "ClangdIndexDataProvider.h"
 
 #include "../GlobalCompilationDatabase.h"
@@ -14,8 +15,13 @@ class ClangdIndex;
 class ClangdIndexerImpl: public ClangdIndexer, public ClangdIndexDataProvider {
   std::string RootPath;
   GlobalCompilationDatabase &CDB;
+  std::vector<Path> ExclusionList;
   std::shared_ptr<ClangdIndex> Index;
   bool IsFromScratch = false;
+
+public:
+  ClangdIndexerImpl(std::string RootPath, GlobalCompilationDatabase &CDB,
+                    std::vector<Path> ExclusionList);
 public:
   ClangdIndexerImpl(std::string RootPath, GlobalCompilationDatabase &CDB);
   void onFileEvent(FileEvent Event) override;
@@ -29,6 +35,13 @@ public:
 
   void dumpIncludedBy(StringRef File) override;
   void dumpInclusions(StringRef File) override;
+  std::vector<Path> getExclusionList() override { return ExclusionList; };
+
+  void setExclusionList(std::vector<Path> FilesToBeExcluded) override {
+    ExclusionList.clear();
+    for (auto CurrentPath : FilesToBeExcluded)
+      ExclusionList.push_back(CurrentPath);
+  };
 
 private:
   void indexFile (StringRef File);

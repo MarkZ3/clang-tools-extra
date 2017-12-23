@@ -238,7 +238,6 @@ ParsedAST::Build(const Context &Ctx,
                  std::unique_ptr<llvm::MemoryBuffer> Buffer,
                  std::shared_ptr<PCHContainerOperations> PCHs,
                  IntrusiveRefCntPtr<vfs::FileSystem> VFS, PathRef FileName) {
-
   std::vector<DiagWithFixIts> ASTDiags;
   StoreDiagsConsumer UnitDiagsConsumer(/*ref*/ ASTDiags);
 
@@ -542,6 +541,41 @@ public:
   }
 };
 
+/// Finds declarations and macros that a given source location refers to.
+class CodeLensFinder : public index::IndexDataConsumer {
+  std::vector<const Decl *> Decls;
+  ASTContext &AST;
+  Preprocessor &PP;
+public:
+  CodeLensFinder(raw_ostream &OS,
+                             ASTContext &AST, Preprocessor &PP) : AST(AST), PP(PP) {}
+
+  std::vector<const Decl *> takeDecls() {
+    // Don't keep the same declaration multiple times.
+    // This can happen when nodes in the AST are visited twice.
+    std::sort(Decls.begin(), Decls.end());
+    auto Last = std::unique(Decls.begin(), Decls.end());
+    Decls.erase(Last, Decls.end());
+    return std::move(Decls);
+  }
+
+  bool
+  handleDeclOccurence(const Decl *D, index::SymbolRoleSet Roles,
+                      ArrayRef<index::SymbolRelation> Relations, FileID FID,
+                      unsigned Offset,
+                      index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
+    if (dyn_cast<FunctionDecl>(D))
+      Decls.push_back(D);
+
+    return true;
+  }
+
+private:
+
+  void finish() override {
+  }
+};
+
 } // namespace
 
 llvm::Optional<Location>
@@ -574,6 +608,7 @@ getDeclarationLocation(ParsedAST &AST, const SourceRange &ValSourceRange) {
 }
 
 std::vector<Location> clangd::findDefinitions(const Context &Ctx, ParsedAST &AST, Position Pos, ClangdIndexDataProvider &IndexDataProvider) {
+
   const SourceManager &SourceMgr = AST.getASTContext().getSourceManager();
   const FileEntry *FE = SourceMgr.getFileEntryForID(SourceMgr.getMainFileID());
   if (!FE)
@@ -760,6 +795,72 @@ clangd::findDocumentHighlights(const Context &Ctx, ParsedAST &AST,
                      DocHighlightsFinder, IndexOpts);
 
   return DocHighlightsFinder->takeHighlights();
+}
+
+std::vector<CodeLens>
+clangd::findCodeLens(ParsedAST &AST, PathRef File, ClangdIndexDataProvider &IndexDataProvider) {
+  const SourceManager &SourceMgr = AST.getASTContext().getSourceManager();
+  const LangOptions &LangOpts = AST.getASTContext().getLangOpts();
+  std::vector<CodeLens> Result;
+  auto LensFinder = std::make_shared<CodeLensFinder>(
+        llvm::errs(), AST.getASTContext(),
+        AST.getPreprocessor());
+    index::IndexingOptions IndexOpts;
+    IndexOpts.SystemSymbolFilter =
+        index::IndexingOptions::SystemSymbolFilterKind::All;
+    IndexOpts.IndexFunctionLocals = true;
+
+    indexTopLevelDecls(AST.getASTContext(), AST.getTopLevelDecls(),
+            LensFinder, IndexOpts);
+
+    std::vector<const Decl *> Decls = LensFinder->takeDecls();
+    if (Decls.empty())
+        return {};
+
+      // Make CXXConstructorDecl lower priority. For example:
+      // MyClass Obj;
+      // We likely want to find the references to Obj not MyClass()
+      std::sort(Decls.begin(), Decls.end(), [](const Decl * &D1, const Decl * &D2) {
+        return !dyn_cast<CXXConstructorDecl>(D1);
+      });
+
+      const Decl* D = Decls[0];
+
+
+  std::vector<Location> References;
+  SmallString<256> USRBuf;
+  if (!index::generateUSRForDecl(D, USRBuf)) {
+    index::SymbolRoleSet InterestingRoleSet = static_cast<index::SymbolRoleSet>(index::SymbolRole::Reference);
+    InterestingRoleSet |=
+        static_cast<index::SymbolRoleSet>(index::SymbolRole::Declaration)
+            | static_cast<index::SymbolRoleSet>(index::SymbolRole::Definition);
+    IndexDataProvider.foreachSymbols(USRBuf, [InterestingRoleSet, &References, &SourceMgr, &LangOpts, D](ClangdIndexDataSymbol &Sym) {
+      unsigned numOccurences = 0;
+      Sym.foreachOccurrence(InterestingRoleSet, [&References, &SourceMgr, &LangOpts, &numOccurences](ClangdIndexDataOccurrence &Occurrence) {
+        numOccurences++;
+        return true;
+      });
+      CodeLens newCL;
+      Command newCommand;
+      newCommand.title = numOccurences + " test1234";
+      newCL.command = newCommand;
+      if (auto FuncDecl = dyn_cast<FunctionDecl>(D))
+        if(FuncDecl->isThisDeclarationADefinition()) {
+          SourceLocation LocStart = SourceMgr.getExpansionLoc(D->getSourceRange().getBegin());
+          SourceLocation LocEnd = Lexer::getLocForEndOfToken(D->getSourceRange().getEnd(), 0, SourceMgr, LangOpts);
+          Position Begin, End;
+          Begin.line = SourceMgr.getSpellingLineNumber(LocStart) - 1;
+          Begin.character = SourceMgr.getSpellingColumnNumber(LocStart) - 1;
+          End.line = SourceMgr.getSpellingLineNumber(LocEnd) - 1;
+          End.character = SourceMgr.getSpellingColumnNumber(LocEnd) - 1;
+          Range R = {Begin, End};
+          newCL.range = R;
+        }
+      return true;
+    });
+  }
+
+  return Result;
 }
 
 void ParsedAST::ensurePreambleDeclsDeserialized() {

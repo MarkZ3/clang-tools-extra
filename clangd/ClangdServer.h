@@ -13,11 +13,13 @@
 #include "ClangdUnitStore.h"
 #include "DraftStore.h"
 #include "GlobalCompilationDatabase.h"
+#include "index/ClangdIndexerImpl.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Core/Replacement.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Path.h"
 
 #include "ClangdUnit.h"
 #include "CodeComplete.h"
@@ -214,7 +216,7 @@ public:
                llvm::Optional<StringRef> ResourceDir = llvm::None);
 
   /// Set the root path of the workspace.
-  void setRootPath(PathRef RootPath);
+  void setRootPath(PathRef RootPath, std::vector<Path> ExclusionList);
 
   /// Add a \p File to the list of tracked C++ files or update the contents if
   /// \p File is already tracked. Also schedules parsing of the AST for it on a
@@ -309,6 +311,11 @@ public:
   llvm::Expected<tooling::Replacements>
   formatOnType(StringRef Code, PathRef File, Position Pos);
 
+  /// Get code lens for a given position
+  llvm::Expected<Tagged<std::vector<CodeLens>>>
+  findCodeLens(PathRef File);
+
+
   /// Rename all occurrences of the symbol at the \p Pos in \p File to
   /// \p NewName.
   Expected<std::vector<tooling::Replacement>> rename(const Context &Ctx,
@@ -330,8 +337,7 @@ public:
 
   llvm::Expected<std::vector<SymbolInformation>>
   onWorkspaceSymbol(StringRef Query);
-
-  void reindex();
+  void reindex(std::vector<Path> ExclusionList);
   void dumpIncludedBy (URI File);
   void dumpInclusions (URI File);
   void printStats();

@@ -1,6 +1,8 @@
 #ifndef TOOLS_CLANG_TOOLS_EXTRA_CLANGD_INDEX_CLANGDINDEXDATABUILDER_H_
 #define TOOLS_CLANG_TOOLS_EXTRA_CLANGD_INDEX_CLANGDINDEXDATABUILDER_H_
 
+
+#include "Path.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FileSystem.h"
 
@@ -12,6 +14,9 @@ namespace clangd {
 class ClangdIndexDataProvider;
 
 class ClangdIndexer {
+
+private:
+  std::vector<Path> ExclusionList;
 public:
   enum class FileChangeType {
     Created = 1,
@@ -29,6 +34,9 @@ public:
   virtual void reindex() = 0;
   virtual void printStats() = 0;
 
+
+  virtual std::vector<Path> getExclusionList() = 0;
+  virtual void setExclusionList(std::vector<Path> FilesToBeExcluded) = 0;
   virtual ~ClangdIndexer() = default;
 };
 
