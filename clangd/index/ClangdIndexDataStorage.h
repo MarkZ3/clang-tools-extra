@@ -13,6 +13,7 @@
 #include "ClangdIndexDataPiece.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Error.h"
 
 #include <deque>
 #include <fstream>
@@ -201,8 +202,8 @@ public:
   ClangdIndexDataStorage(const std::string &FilePath, unsigned Version);
   virtual ~ClangdIndexDataStorage();
 
-  void readPiece(char* Buf, std::streampos Position);
-  void writePiece(char* Buf, std::streampos Position);
+  llvm::Error readPiece(char* Buf, std::streampos Position);
+  llvm::Error writePiece(char* Buf, std::streampos Position);
   RecordPointer mallocRecord(unsigned Datasize);
   void freeRecord(RecordPointer Offset);
   void flush();

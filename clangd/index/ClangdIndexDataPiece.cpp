@@ -25,7 +25,7 @@ ClangdIndexDataPiece::ClangdIndexDataPiece(ClangdIndexDataStorage &Storage,
         Storage) {
 }
 
-void ClangdIndexDataPiece::read() {
+llvm::Error ClangdIndexDataPiece::read() {
   Storage.readPiece(Buffer, ID * PIECE_SIZE);
 }
 

@@ -12,6 +12,8 @@
 
 #include <memory>
 
+#include "llvm/Support/Error.h"
+
 namespace clang {
 namespace clangd {
 
@@ -23,7 +25,7 @@ class ClangdIndexDataStorage;
 class ClangdIndexDataPiece {
 public:
   ClangdIndexDataPiece(ClangdIndexDataStorage &Storage, unsigned ID);
-  void read();
+  llvm::Error read();
   void clear(RecordPointer Rec, unsigned Length);
   void flush();
 

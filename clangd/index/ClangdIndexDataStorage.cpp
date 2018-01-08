@@ -10,6 +10,8 @@
 #include "ClangdIndexDataStorage.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Errc.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace clang {
@@ -24,6 +26,12 @@ const unsigned DEFAULT_CACHE_SIZE = 64 * 1024 * 1024;
 const unsigned DEFAULT_CACHE_SIZE_PIECES = DEFAULT_CACHE_SIZE
     / ClangdIndexDataPiece::PIECE_SIZE;
 const unsigned DEFAULT_CACHE_RECENT_SIZE_PIECES = DEFAULT_CACHE_SIZE_PIECES / 3;
+
+namespace {
+  llvm::Error errorFromStream() {
+    return llvm::make_error<llvm::StringError>("I/O error in index storage", llvm::errc::io_error);
+  }
+}
 
 ClangdIndexDataStorage::ClangdIndexDataStorage(const std::string &FilePath,
     unsigned Version) :
@@ -65,9 +73,12 @@ ClangdIndexDataStorage::ClangdIndexDataStorage(const std::string &FilePath,
   }
 }
 
-void ClangdIndexDataStorage::writePiece(char *Buffer, std::streampos Position) {
+llvm::Error ClangdIndexDataStorage::writePiece(char *Buffer, std::streampos Position) {
   FileStream.seekp(Position, std::ios::beg);
   FileStream.write(Buffer, ClangdIndexDataPiece::PIECE_SIZE);
+  if (isInvalid())
+    return errorFromStream();
+  return llvm::Error::success();
 }
 
 ClangdIndexDataStorage::~ClangdIndexDataStorage() {
@@ -277,9 +288,12 @@ ClangdIndexDataPieceRef ClangdIndexDataStorage::getDataPiece(
   return Piece;
 }
 
-void ClangdIndexDataStorage::readPiece(char* Buf, std::streampos Position) {
+llvm::Error ClangdIndexDataStorage::readPiece(char* Buf, std::streampos Position) {
   FileStream.seekg(Position, std::ios::beg);
   FileStream.read(Buf, ClangdIndexDataPiece::PIECE_SIZE);
+  if (isInvalid())
+    return errorFromStream();
+  return llvm::Error::success();
 }
 
 RecordPointer ClangdIndexDataStorage::createNewPiece() {
