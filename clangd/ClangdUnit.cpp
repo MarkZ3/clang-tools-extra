@@ -35,6 +35,8 @@
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "index/ClangdIndexDataProvider.h"
+
 #include <algorithm>
 
 using namespace clang::clangd;

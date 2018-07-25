@@ -213,6 +213,11 @@ public:
   handleDeclOccurence(const Decl *, index::SymbolRoleSet Roles,
                       ArrayRef<index::SymbolRelation> Relations,
                       SourceLocation Loc,
+// Hack so that we can use the same Clangd branch with Clang that might or
+// might not have the libIndexStore patches
+#ifdef HAS_SYS_FILE_PARAM
+      bool IsInSystemFile,
+#endif
                       index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
     assert(ASTNode.OrigD);
     // No point in continuing the index consumer if we could not get the

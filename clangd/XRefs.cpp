@@ -113,6 +113,11 @@ public:
   handleDeclOccurence(const Decl *D, index::SymbolRoleSet Roles,
                       ArrayRef<index::SymbolRelation> Relations,
                       SourceLocation Loc,
+// Hack so that we can use the same Clangd branch with Clang that might or
+// might not have the libIndexStore patches
+#ifdef HAS_SYS_FILE_PARAM
+      bool IsInSystemFile,
+#endif
                       index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
     if (Loc == SearchedLocation) {
       // Find and add definition declarations (for GoToDefinition).
@@ -265,6 +270,11 @@ public:
 
   bool handleDeclOccurence(const Decl *D, index::SymbolRoleSet Roles,
       ArrayRef<index::SymbolRelation> Relations, SourceLocation Loc,
+// Hack so that we can use the same Clangd branch with Clang that might or
+// might not have the libIndexStore patches
+#ifdef HAS_SYS_FILE_PARAM
+      bool IsInSystemFile,
+#endif
       index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
     const SourceManager &SourceMgr = AST.getASTContext().getSourceManager();
     // Can this be replcaed by SourceMgr.isInMainFile?
@@ -538,6 +548,11 @@ public:
   handleDeclOccurence(const Decl *D, index::SymbolRoleSet Roles,
                       ArrayRef<index::SymbolRelation> Relations,
                       SourceLocation Loc,
+// Hack so that we can use the same Clangd branch with Clang that might or
+// might not have the libIndexStore patches
+#ifdef HAS_SYS_FILE_PARAM
+      bool IsInSystemFile,
+#endif
                       index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
 
     const SourceManager &SourceMgr = AST.getASTContext().getSourceManager();
@@ -645,6 +660,11 @@ public:
   handleDeclOccurence(const Decl *D, index::SymbolRoleSet Roles,
                       ArrayRef<index::SymbolRelation> Relations,
                       SourceLocation Loc,
+// Hack so that we can use the same Clangd branch with Clang that might or
+// might not have the libIndexStore patches
+#ifdef HAS_SYS_FILE_PARAM
+      bool IsInSystemFile,
+#endif
                       index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
     const SourceManager &SourceMgr = AST.getSourceManager();
     SourceLocation HighlightStartLoc = SourceMgr.getFileLoc(Loc);

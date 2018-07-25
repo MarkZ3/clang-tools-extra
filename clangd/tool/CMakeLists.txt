@@ -8,6 +8,12 @@ set(LLVM_LINK_COMPONENTS
   support
   )
 
+if( ENABLE_LIB_INDEX_STORE )
+  set(LIB_INDEX_STORE
+    IndexStore
+  )
+endif()
+
 target_link_libraries(clangd
   PRIVATE
   clangBasic
@@ -17,4 +23,5 @@ target_link_libraries(clangd
   clangSema
   clangTooling
   clangToolingCore
+  ${LIB_INDEX_STORE}
   )

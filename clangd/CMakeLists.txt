@@ -7,6 +7,15 @@ if(NOT HAVE_CXX_ATOMICS64_WITHOUT_LIB)
   list(APPEND CLANGD_ATOMIC_LIB "atomic")
 endif()
 
+if( ENABLE_LIB_INDEX_STORE )
+  set(LIB_INDEX_STORE
+    IndexStore
+  )
+  set(INDEX_STORE_SUPPORT_SOURCES
+    index/indexstore/ClangdIndexStoreIndexer.cpp
+  )
+endif()
+
 add_clang_library(clangDaemon
   AST.cpp
   ClangdFileUtils.cpp
@@ -48,6 +57,7 @@ add_clang_library(clangDaemon
   index/Merge.cpp
   index/SymbolCollector.cpp
   index/SymbolYAML.cpp
+  ${INDEX_STORE_SUPPORT_SOURCES}
 
   LINK_LIBS
   clangAST
@@ -66,7 +76,12 @@ add_clang_library(clangDaemon
   clangToolingRefactor
   ${LLVM_PTHREAD_LIB}
   ${CLANGD_ATOMIC_LIB}
+  ${LIB_INDEX_STORE}
   )
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/clangd-config.h)
 
 if( LLVM_LIB_FUZZING_ENGINE OR LLVM_USE_SANITIZE_COVERAGE )
   add_subdirectory(fuzzer)

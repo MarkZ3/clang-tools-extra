@@ -1,5 +1,6 @@
 #include "index/BTree.h"
 #include "index/ClangdIndex.h"
+#include "index/ClangdIndexDataProvider.h"
 #include "index/ClangdIndexString.h"
 
 #include "gtest/gtest.h"

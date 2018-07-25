@@ -7,7 +7,10 @@
 //
 //===-------------------------------------------------------------------===//
 
+#include "clangd-config.h"
+
 #include "ClangdServer.h"
+
 #include "ClangdFileUtils.h"
 #include "CodeComplete.h"
 #include "FindSymbols.h"
@@ -17,6 +20,9 @@
 #include "index/ClangdIndexDataConsumer.h"
 #include "index/ClangdIndexerImpl.h"
 #include "index/Merge.h"
+#ifdef ENABLE_LIB_INDEX_STORE
+#include "index/indexstore/ClangdIndexStoreIndexer.h"
+#endif
 
 #include "clang/Format/Format.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -144,9 +150,15 @@ void ClangdServer::setRootPath(PathRef RootPath) {
     return;
 
   assert (!Indexer);
+#ifdef ENABLE_LIB_INDEX_STORE
+  auto ClangIndexer = std::make_shared<ClangdIndexStoreIndexer>(RootPath.str(), CDB);
+  Indexer = ClangIndexer;
+  IndexDataProvider = ClangIndexer;
+#else
   auto ClangIndexer = std::make_shared<ClangdIndexerImpl>(RootPath.str(), CDB, IndexerOptions);
   Indexer = ClangIndexer;
   IndexDataProvider = ClangIndexer;
+#endif
   assert(Indexer && IndexDataProvider);
   Indexer->indexRoot();
 }

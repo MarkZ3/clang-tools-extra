@@ -73,6 +73,11 @@ public:
   handleDeclOccurence(const Decl *D, index::SymbolRoleSet Roles,
                       ArrayRef<index::SymbolRelation> Relations,
                       SourceLocation Loc,
+// Hack so that we can use the same Clangd branch with Clang that might or
+// might not have the libIndexStore patches
+#ifdef HAS_SYS_FILE_PARAM
+      bool IsInSystemFile,
+#endif
                       index::IndexDataConsumer::ASTNodeInfo ASTNode) override;
 
   SymbolSlab takeSymbols() { return std::move(Symbols).build(); }
