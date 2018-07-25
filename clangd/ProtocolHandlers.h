@@ -35,6 +35,7 @@ public:
   virtual void onShutdown(ShutdownParams &Params) = 0;
   virtual void onExit(ExitParams &Params) = 0;
   virtual void onDocumentDidOpen(DidOpenTextDocumentParams &Params) = 0;
+  virtual void onDocumentDidSave(DidSaveTextDocumentParams &Params) = 0;
   virtual void onDocumentDidChange(DidChangeTextDocumentParams &Params) = 0;
   virtual void onDocumentDidClose(DidCloseTextDocumentParams &Params) = 0;
   virtual void onDocumentFormatting(DocumentFormattingParams &Params) = 0;
@@ -55,6 +56,9 @@ public:
   virtual void onDocumentHighlight(TextDocumentPositionParams &Params) = 0;
   virtual void onHover(TextDocumentPositionParams &Params) = 0;
   virtual void onChangeConfiguration(DidChangeConfigurationParams &Params) = 0;
+  virtual void onReferences(ReferenceParams &Params) = 0;
+  virtual void onCodeLens(CodeLensParams &Params) = 0;
+  virtual void onCodeLensResolve(CodeLens &Params) = 0;
 };
 
 void registerCallbackHandlers(JSONRPCDispatcher &Dispatcher,

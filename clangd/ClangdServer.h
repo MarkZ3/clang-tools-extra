@@ -16,6 +16,7 @@
 #include "GlobalCompilationDatabase.h"
 #include "Protocol.h"
 #include "TUScheduler.h"
+#include "index/ClangdIndexer.h"
 #include "index/FileIndex.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Core/Replacement.h"
@@ -32,6 +33,9 @@ namespace clang {
 class PCHContainerOperations;
 
 namespace clangd {
+
+class ClangdIndexer;
+class ClangdIndexDataProvider;
 
 class DiagnosticsConsumer {
 public:
@@ -113,7 +117,8 @@ public:
   /// worker thread. Therefore, instances of \p DiagConsumer must properly
   /// synchronize access to shared state.
   ClangdServer(GlobalCompilationDatabase &CDB, FileSystemProvider &FSProvider,
-               DiagnosticsConsumer &DiagConsumer, const Options &Opts);
+               DiagnosticsConsumer &DiagConsumer, const Options &Opts,
+               const ClangdIndexerOptions &IndexerOptions);
 
   /// Set the root path of the workspace.
   void setRootPath(PathRef RootPath);
@@ -150,6 +155,20 @@ public:
   /// Get definition of symbol at a specified \p Line and \p Column in \p File.
   void findDefinitions(PathRef File, Position Pos,
                        Callback<std::vector<Location>> CB);
+
+  /// Get workspace-wide references of symbol at a specified \p Line and
+  /// \p Column in \p File.
+  void findReferences(
+      PathRef File, Position Pos, bool IncludeDeclaration,
+      Callback<std::vector<Location>> CB);
+
+  void codeLens(
+      PathRef File,
+      Callback<std::vector<CodeLens>> CB);
+
+  void codeLensResolve(
+      const CodeLens &CL,
+      Callback<CodeLens> CB);
 
   /// Helper function that returns a path to the corresponding source file when
   /// given a header file and vice versa.
@@ -195,6 +214,8 @@ public:
   void dumpAST(PathRef File, llvm::unique_function<void(std::string)> Callback);
   /// Called when an event occurs for a watched file in the workspace.
   void onFileEvent(const DidChangeWatchedFilesParams &Params);
+  llvm::Expected<std::vector<SymbolInformation>>
+  onWorkspaceSymbol(StringRef Query);
 
   /// Returns estimated memory usage for each of the currently open files.
   /// The order of results is unspecified.
@@ -209,6 +230,10 @@ public:
   // Returns false if the timeout expires.
   LLVM_NODISCARD bool
   blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds = 10);
+  void reindex();
+  void dumpIncludedBy (URIForFile File);
+  void dumpInclusions (URIForFile File);
+  void printStats();
 
 private:
   /// FIXME: This stats several files to find a .clang-format file. I/O can be
@@ -255,6 +280,11 @@ private:
   // called before all other members to stop the worker thread that references
   // ClangdServer.
   TUScheduler WorkScheduler;
+  ClangdIndexerOptions IndexerOptions;
+
+  std::shared_ptr<ClangdIndexer> Indexer;
+  std::shared_ptr<ClangdIndexDataProvider> IndexDataProvider;
+  std::recursive_mutex IndexMutex;
 };
 
 } // namespace clangd

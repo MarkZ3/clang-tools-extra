@@ -80,5 +80,27 @@ prepareCompilerInstance(std::unique_ptr<clang::CompilerInvocation> CI,
   return Clang;
 }
 
+std::unique_ptr<CompilerInvocation>
+createCompilerInvocation(PathRef FileName, ArrayRef<const char *> ArgList,
+                         IntrusiveRefCntPtr<DiagnosticsEngine> Diags,
+                         IntrusiveRefCntPtr<vfs::FileSystem> VFS) {
+  auto CI = createInvocationFromCommandLine(ArgList, std::move(Diags),
+                                            std::move(VFS));
+
+  // When dealing with opening headers, we might use the compile arguments of
+  // one of the source files including it, but we still need to change the input
+  // file to the header file path. Doing this here is less error prone than
+  // trying to modify the command-line arguments.
+  auto &Inputs = CI->getFrontendOpts().Inputs;
+  // Only do the input file substitution trick when there's only one input file,
+  // otherwise we might be in an entirely (unknown) different situation.
+  if (Inputs.size() == 1) {
+    auto &OldInput = Inputs[0];
+    if (OldInput.getFile() != FileName)
+      Inputs[0] = FrontendInputFile(FileName, OldInput.getKind());
+  }
+  return CI;
+}
+
 } // namespace clangd
 } // namespace clang

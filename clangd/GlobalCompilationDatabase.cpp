@@ -9,6 +9,8 @@
 
 #include "GlobalCompilationDatabase.h"
 #include "Logger.h"
+#include "index/ClangdIndex.h"
+
 #include "clang/Tooling/CompilationDatabase.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -38,15 +40,54 @@ DirectoryBasedGlobalCompilationDatabase::
 DirectoryBasedGlobalCompilationDatabase::
     ~DirectoryBasedGlobalCompilationDatabase() = default;
 
+llvm::Optional<tooling::CompileCommand> DirectoryBasedGlobalCompilationDatabase::getCompileCommandsUsingIndex(std::unique_ptr<ClangdIndexFile> IndexFile, bool InferMissing) const {
+
+  llvm::Optional<tooling::CompileCommand> Commands;
+
+  class FirstDependentSourceFileVisitor : public ClangdIndexFile::DependentVisitor {
+    const DirectoryBasedGlobalCompilationDatabase &GCDB;
+    llvm::Optional<tooling::CompileCommand> &Commands;
+    bool InferMissing;
+  public:
+    FirstDependentSourceFileVisitor(const DirectoryBasedGlobalCompilationDatabase &GCDB,
+        llvm::Optional<tooling::CompileCommand> &Commands, bool InferMissing) :
+          GCDB(GCDB), Commands(Commands), InferMissing(InferMissing) {
+    }
+
+    virtual ClangdIndexFile::NodeVisitResult VisitDependent(ClangdIndexFile& IndexFile) {
+      auto IncludedBy = IndexFile.getFirstIncludedBy();
+      if (!IncludedBy) {
+        Commands = GCDB.getCompileCommand(IndexFile.getPath(), InferMissing);
+        if (Commands)
+          return ClangdIndexFile::NodeVisitResult::ABORT;
+      }
+      return ClangdIndexFile::NodeVisitResult::CONTINUE;
+    }
+  };
+
+  FirstDependentSourceFileVisitor V(*this, Commands, InferMissing);
+  IndexFile->visitDependentFiles(V);
+  return Commands;
+}
+
 llvm::Optional<tooling::CompileCommand>
-DirectoryBasedGlobalCompilationDatabase::getCompileCommand(PathRef File) const {
-  if (auto CDB = getCDBForFile(File)) {
+DirectoryBasedGlobalCompilationDatabase::getCompileCommand(PathRef File, bool InferMissing) const {
+  if (auto CDB = getCDBForFile(File, InferMissing)) {
     auto Candidates = CDB->getCompileCommands(File);
     if (!Candidates.empty()) {
       addExtraFlags(File, Candidates.front());
       return std::move(Candidates.front());
     }
   } else {
+    //TODO: index mutex needs to be locked!
+    if (auto LockedIndex = Index.lock()) {
+      auto IndexFile = LockedIndex->getFile(File.str());
+      if (IndexFile) {
+        auto Commands = getCompileCommandsUsingIndex(std::move(IndexFile), InferMissing);
+        if (Commands)
+          return Commands;
+      }
+    }
     log("Failed to find compilation database for " + Twine(File));
   }
   return llvm::None;
@@ -88,22 +129,25 @@ void DirectoryBasedGlobalCompilationDatabase::addExtraFlags(
 }
 
 tooling::CompilationDatabase *
-DirectoryBasedGlobalCompilationDatabase::getCDBInDirLocked(PathRef Dir) const {
+DirectoryBasedGlobalCompilationDatabase::getCDBInDirLocked(PathRef Dir, bool InferMissing) const {
   // FIXME(ibiryukov): Invalidate cached compilation databases on changes
   auto CachedIt = CompilationDatabases.find(Dir);
   if (CachedIt != CompilationDatabases.end())
-    return CachedIt->second.get();
+    return InferMissing ? CachedIt->second.first.get() : CachedIt->second.second;
   std::string Error = "";
   auto CDB = tooling::CompilationDatabase::loadFromDirectory(Dir, Error);
-  if (CDB)
+  tooling::CompilationDatabase* CDBRawPtr = nullptr;
+  if (CDB) {
+    CDBRawPtr = CDB.get();
     CDB = tooling::inferMissingCompileCommands(std::move(CDB));
+  }
   auto Result = CDB.get();
-  CompilationDatabases.insert(std::make_pair(Dir, std::move(CDB)));
+  CompilationDatabases.insert(std::make_pair(Dir, std::make_pair(std::move(CDB), CDBRawPtr)));
   return Result;
 }
 
 tooling::CompilationDatabase *
-DirectoryBasedGlobalCompilationDatabase::getCDBForFile(PathRef File) const {
+DirectoryBasedGlobalCompilationDatabase::getCDBForFile(PathRef File, bool InferMissing) const {
   namespace path = llvm::sys::path;
   assert((path::is_absolute(File, path::Style::posix) ||
           path::is_absolute(File, path::Style::windows)) &&
@@ -111,10 +155,10 @@ DirectoryBasedGlobalCompilationDatabase::getCDBForFile(PathRef File) const {
 
   std::lock_guard<std::mutex> Lock(Mutex);
   if (CompileCommandsDir)
-    return getCDBInDirLocked(*CompileCommandsDir);
+    return getCDBInDirLocked(*CompileCommandsDir, InferMissing);
   for (auto Path = path::parent_path(File); !Path.empty();
        Path = path::parent_path(Path))
-    if (auto CDB = getCDBInDirLocked(Path))
+    if (auto CDB = getCDBInDirLocked(Path, InferMissing))
       return CDB;
   return nullptr;
 }
@@ -124,7 +168,7 @@ CachingCompilationDb::CachingCompilationDb(
     : InnerCDB(InnerCDB) {}
 
 llvm::Optional<tooling::CompileCommand>
-CachingCompilationDb::getCompileCommand(PathRef File) const {
+CachingCompilationDb::getCompileCommand(PathRef File, bool InferMissing) const {
   std::unique_lock<std::mutex> Lock(Mut);
   auto It = Cached.find(File);
   if (It != Cached.end())
@@ -132,7 +176,7 @@ CachingCompilationDb::getCompileCommand(PathRef File) const {
 
   Lock.unlock();
   llvm::Optional<tooling::CompileCommand> Command =
-      InnerCDB.getCompileCommand(File);
+      InnerCDB.getCompileCommand(File, InferMissing);
   Lock.lock();
   return Cached.try_emplace(File, std::move(Command)).first->getValue();
 }

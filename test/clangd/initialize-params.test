@@ -6,6 +6,9 @@
 # CHECK-NEXT:  "result": {
 # CHECK-NEXT:    "capabilities": {
 # CHECK-NEXT:      "codeActionProvider": true,
+# CHECK-NEXT:      "codeLensProvider": {
+# CHECK-NEXT:        "resolveProvider": true
+# CHECK-NEXT:      },
 # CHECK-NEXT:      "completionProvider": {
 # CHECK-NEXT:        "resolveProvider": false,
 # CHECK-NEXT:        "triggerCharacters": [
@@ -29,6 +32,7 @@
 # CHECK-NEXT:        ]
 # CHECK-NEXT:      },
 # CHECK-NEXT:      "hoverProvider": true,
+# CHECK-NEXT:      "referencesProvider": true,
 # CHECK-NEXT:      "renameProvider": true,
 # CHECK-NEXT:      "signatureHelpProvider": {
 # CHECK-NEXT:        "triggerCharacters": [

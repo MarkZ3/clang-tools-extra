@@ -101,9 +101,14 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const Range &R) {
 
 json::Value toJSON(const Location &P) {
   return json::Object{
-      {"uri", P.uri},
-      {"range", P.range},
+    {"uri", P.uri},
+    {"range", P.range},
   };
+}
+
+bool fromJSON(const json::Value &Params, Location &L) {
+  json::ObjectMapper O(Params);
+  return O && O.map("uri", L.uri) && O.map("range", L.range);
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const Location &L) {
@@ -284,6 +289,11 @@ bool fromJSON(const json::Value &Params, DidChangeTextDocumentParams &R) {
          O.map("wantDiagnostics", R.wantDiagnostics);
 }
 
+bool fromJSON(const json::Value &Params, DidSaveTextDocumentParams &R) {
+  json::ObjectMapper O(Params);
+  return O && O.map("textDocument", R.textDocument);
+}
+
 bool fromJSON(const json::Value &E, FileChangeType &Out) {
   if (auto T = E.getAsInteger()) {
     if (*T < static_cast<int>(FileChangeType::Created) ||
@@ -396,6 +406,17 @@ bool fromJSON(const json::Value &Params, WorkspaceEdit &R) {
 
 const llvm::StringLiteral ExecuteCommandParams::CLANGD_APPLY_FIX_COMMAND =
     "clangd.applyFix";
+const llvm::StringLiteral ExecuteCommandParams::CLANGD_REFERENCES =
+    "clangd.references";
+const llvm::StringLiteral ExecuteCommandParams::CLANGD_REINDEX_COMMAND =
+    "clangd.reindex";
+const llvm::StringLiteral ExecuteCommandParams::CLANGD_DUMPINCLUDEDBY_COMMAND =
+    "clangd.dumpincludedby";
+const llvm::StringLiteral ExecuteCommandParams::CLANGD_DUMPINCLUSIONS_COMMAND =
+    "clangd.dumpinclusions";
+const llvm::StringLiteral ExecuteCommandParams::CLANGD_PRINTSTATS_COMMAND =
+    "clangd.printstats";
+
 bool fromJSON(const json::Value &Params, ExecuteCommandParams &R) {
   json::ObjectMapper O(Params);
   if (!O || !O.map("command", R.command))
@@ -405,17 +426,32 @@ bool fromJSON(const json::Value &Params, ExecuteCommandParams &R) {
   if (R.command == ExecuteCommandParams::CLANGD_APPLY_FIX_COMMAND) {
     return Args && Args->size() == 1 &&
            fromJSON(Args->front(), R.workspaceEdit);
+  } else if (R.command == ExecuteCommandParams::CLANGD_DUMPINCLUDEDBY_COMMAND) {
+      return Args && Args->size() == 1 &&
+             fromJSON(Args->front(), R.textDocument);
+  } else if (R.command == ExecuteCommandParams::CLANGD_DUMPINCLUSIONS_COMMAND) {
+      return Args && Args->size() == 1 &&
+             fromJSON(Args->front(), R.textDocument);
+  } else if (R.command == ExecuteCommandParams::CLANGD_REINDEX_COMMAND) {
+      return !Args || Args->empty();
+  } else if (R.command == ExecuteCommandParams::CLANGD_PRINTSTATS_COMMAND) {
+      return !Args || Args->empty();
   }
   return false; // Unrecognized command.
 }
 
 json::Value toJSON(const SymbolInformation &P) {
   return json::Object{
-      {"name", P.name},
-      {"kind", static_cast<int>(P.kind)},
-      {"location", P.location},
-      {"containerName", P.containerName},
-  };
+    {"name", P.name},
+    {"kind", static_cast<int>(P.kind)},
+    {"location", P.location},
+    {"containerName", P.containerName},
+};
+}
+
+bool fromJSON(const json::Value &Params, CodeLensParams &R) {
+  json::ObjectMapper O(Params);
+  return O && O.map("textDocument", R.textDocument);
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &O,
@@ -433,7 +469,15 @@ json::Value toJSON(const Command &C) {
   auto Cmd = json::Object{{"title", C.title}, {"command", C.command}};
   if (C.workspaceEdit)
     Cmd["arguments"] = {*C.workspaceEdit};
+  else if (C.textDocument && C.position && C.locations) {
+    Cmd["arguments"] = json::Array{*C.textDocument, *C.position, json::Array{*C.locations}};
+  }
   return std::move(Cmd);
+}
+
+bool fromJSON(const json::Value &Params, Command &C) {
+  json::ObjectMapper O(Params);
+  return O && O.map("title", C.title) && O.map("command", C.command);
 }
 
 json::Value toJSON(const WorkspaceEdit &WE) {
@@ -443,6 +487,32 @@ json::Value toJSON(const WorkspaceEdit &WE) {
   for (auto &Change : *WE.changes)
     FileChanges[Change.first] = json::Array(Change.second);
   return json::Object{{"changes", std::move(FileChanges)}};
+}
+
+bool fromJSON(const json::Value &Params, CodeLensData &C) {
+  json::ObjectMapper O(Params);
+  return O && O.map("loc", C.loc);
+}
+
+json::Value toJSON(const CodeLensData &C) {
+  return json::Object{{"loc", C.loc}};
+}
+
+bool fromJSON(const json::Value &Params, CodeLens &C) {
+  json::ObjectMapper O(Params);
+  return O && O.map("range", C.range)
+      && O.map("command", C.command)
+      && O.map("data", C.data);
+}
+
+json::Value toJSON(const CodeLens &C) {
+  json::Object Result{
+      {"range", C.range},
+      {"data", C.data}
+  };
+  if (C.command.hasValue())
+    Result["command"] = toJSON(*C.command);
+  return std::move(Result);
 }
 
 json::Value toJSON(const ApplyWorkspaceEditParams &Params) {
@@ -506,6 +576,18 @@ json::Value toJSON(const CompletionItem &CI) {
   if (!CI.additionalTextEdits.empty())
     Result["additionalTextEdits"] = json::Array(CI.additionalTextEdits);
   return std::move(Result);
+}
+
+bool fromJSON(const json::Value &Params, ReferenceContext &R) {
+  json::ObjectMapper O(Params);
+  return O && O.map("includeDeclaration", R.includeDeclaration);
+}
+
+bool fromJSON(const json::Value &Params, ReferenceParams &R) {
+  json::ObjectMapper O(Params);
+  return O && O.map("context", R.context) &&
+      O.map("textDocument", R.textDocument) &&
+      O.map("position", R.position);
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &O, const CompletionItem &I) {

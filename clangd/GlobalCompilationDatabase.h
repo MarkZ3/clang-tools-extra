@@ -11,7 +11,10 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_GLOBALCOMPILATIONDATABASE_H
 
 #include "Path.h"
+#include "index/ClangdIndex.h"
+
 #include "llvm/ADT/StringMap.h"
+
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -34,12 +37,14 @@ public:
 
   /// If there are any known-good commands for building this file, returns one.
   virtual llvm::Optional<tooling::CompileCommand>
-  getCompileCommand(PathRef File) const = 0;
+  getCompileCommand(PathRef File, bool InferMissing = true) const = 0;
 
   /// Makes a guess at how to build a file.
   /// The default implementation just runs clang on the file.
   /// Clangd should treat the results as unreliable.
   virtual tooling::CompileCommand getFallbackCommand(PathRef File) const;
+  virtual void setIndex(std::weak_ptr<ClangdIndex> Index) {
+  }
 
   /// FIXME(ibiryukov): add facilities to track changes to compilation flags of
   /// existing targets.
@@ -57,7 +62,7 @@ public:
   /// Scans File's parents looking for compilation databases.
   /// Any extra flags will be added.
   llvm::Optional<tooling::CompileCommand>
-  getCompileCommand(PathRef File) const override;
+  getCompileCommand(PathRef File, bool InferMissing) const override;
 
   /// Uses the default fallback command, adding any extra flags.
   tooling::CompileCommand getFallbackCommand(PathRef File) const override;
@@ -67,23 +72,34 @@ public:
 
   /// Sets the extra flags that should be added to a file.
   void setExtraFlagsForFile(PathRef File, std::vector<std::string> ExtraFlags);
+  void setIndex(std::weak_ptr<ClangdIndex> Index) override {
+    this->Index = Index;
+  }
 
 private:
-  tooling::CompilationDatabase *getCDBForFile(PathRef File) const;
-  tooling::CompilationDatabase *getCDBInDirLocked(PathRef File) const;
+  tooling::CompilationDatabase *getCDBForFile(PathRef File, bool InferMissing) const;
+  tooling::CompilationDatabase *getCDBInDirLocked(PathRef File, bool InferMissing) const;
   void addExtraFlags(PathRef File, tooling::CompileCommand &C) const;
+  llvm::Optional<tooling::CompileCommand>
+  getCompileCommandsUsingIndex(std::unique_ptr<ClangdIndexFile> IndexFile, bool InferMissing) const;
+
+  using InferredAndNonInferredCDB = std::pair<std::unique_ptr<clang::tooling::CompilationDatabase>, clang::tooling::CompilationDatabase*>;
 
   mutable std::mutex Mutex;
   /// Caches compilation databases loaded from directories(keys are
   /// directories).
-  mutable llvm::StringMap<std::unique_ptr<clang::tooling::CompilationDatabase>>
-      CompilationDatabases;
+  mutable llvm::StringMap<InferredAndNonInferredCDB> CompilationDatabases;
 
   /// Stores extra flags per file.
   llvm::StringMap<std::vector<std::string>> ExtraFlagsForFile;
   /// Used for command argument pointing to folder where compile_commands.json
   /// is located.
   llvm::Optional<Path> CompileCommandsDir;
+  // The index can assist in which source file to lookup in the database,
+  // when requesting the database for a header for example.
+  //FIXME: I don't think setting the index after the fact here after
+  // construction is good.
+  std::weak_ptr<ClangdIndex> Index;
 };
 
 /// A wrapper around GlobalCompilationDatabase that caches the compile commands.
@@ -95,7 +111,7 @@ public:
   /// Gets compile command for \p File from cache or CDB if it's not in the
   /// cache.
   llvm::Optional<tooling::CompileCommand>
-  getCompileCommand(PathRef File) const override;
+  getCompileCommand(PathRef File, bool InferMissing) const override;
 
   /// Forwards to the inner CDB. Results of this function are not cached.
   tooling::CompileCommand getFallbackCommand(PathRef File) const override;

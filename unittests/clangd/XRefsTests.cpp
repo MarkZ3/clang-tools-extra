@@ -115,7 +115,7 @@ TEST(GoToDefinition, WithIndex) {
   auto Index = TU.index();
   auto runFindDefinitionsWithIndex = [&Index](const Annotations &Main) {
     auto AST = TestTU::withCode(Main.code()).build();
-    return clangd::findDefinitions(AST, Main.point(), Index.get());
+    return clangd::findDefinitions(AST, Main.point(), nullptr, Index.get());
   };
 
   Annotations Test(R"cpp(// only declaration in AST.
@@ -299,13 +299,14 @@ TEST(GoToDefinition, All) {
          void f() { T^est a; }
       )cpp",
   };
+
   for (const char *Test : Tests) {
     Annotations T(Test);
     auto AST = TestTU::withCode(T.code()).build();
     std::vector<Matcher<Location>> ExpectedLocations;
     for (const auto &R : T.ranges())
       ExpectedLocations.push_back(RangeIs(R));
-    EXPECT_THAT(findDefinitions(AST, T.point()),
+    EXPECT_THAT(findDefinitions(AST, T.point(), nullptr),
                 ElementsAreArray(ExpectedLocations))
         << Test;
   }
@@ -320,7 +321,7 @@ int baz = f^oo;
   IgnoreDiagnostics DiagConsumer;
   MockCompilationDatabase CDB(/*UseRelPaths=*/true);
   MockFSProvider FS;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto FooCpp = testPath("foo.cpp");
   FS.Files[FooCpp] = "";
@@ -920,7 +921,7 @@ TEST(GoToInclude, All) {
   MockFSProvider FS;
   IgnoreDiagnostics DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto FooCpp = testPath("foo.cpp");
   const char *SourceContents = R"cpp(

@@ -13,7 +13,6 @@
 #include "Matchers.h"
 #include "SyncAPI.h"
 #include "TestFS.h"
-#include "URI.h"
 #include "clang/Config/config.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
@@ -144,7 +143,7 @@ protected:
     MockFSProvider FS;
     ErrorCheckingDiagConsumer DiagConsumer;
     MockCompilationDatabase CDB;
-    ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+    ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
     for (const auto &FileWithContents : ExtraFiles)
       FS.Files[testPath(FileWithContents.first)] = FileWithContents.second;
 
@@ -196,7 +195,7 @@ TEST_F(ClangdVFSTest, Reparse) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   const auto SourceContents = R"cpp(
 #include "foo.h"
@@ -231,7 +230,7 @@ TEST_F(ClangdVFSTest, ReparseOnHeaderChange) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   const auto SourceContents = R"cpp(
 #include "foo.h"
@@ -284,7 +283,7 @@ TEST_F(ClangdVFSTest, PropagatesContexts) {
   MockCompilationDatabase CDB;
 
   // Verify that the context is plumbed to the FS provider and diagnostics.
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
   {
     WithContextValue Entrypoint(Secret, 42);
     Server.addDocument(testPath("foo.cpp"), "void main(){}");
@@ -305,7 +304,7 @@ TEST_F(ClangdVFSTest, SearchLibDir) {
                              {"-xc++", "-target", "x86_64-linux-unknown",
                               "-m64", "--gcc-toolchain=/randomusr",
                               "-stdlib=libstdc++"});
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   // Just a random gcc version string
   SmallString<8> Version("4.9.3");
@@ -350,7 +349,7 @@ TEST_F(ClangdVFSTest, ForceReparseCompileCommand) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto FooCpp = testPath("foo.cpp");
   const auto SourceContents1 = R"cpp(
@@ -386,7 +385,7 @@ TEST_F(ClangdVFSTest, ForceReparseCompileCommandDefines) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto FooCpp = testPath("foo.cpp");
   const auto SourceContents = R"cpp(
@@ -438,7 +437,7 @@ int hello;
   MockFSProvider FS;
   MockCompilationDatabase CDB;
   MultipleErrorCheckingDiagConsumer DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto FooCpp = testPath("foo.cpp");
   auto BarCpp = testPath("bar.cpp");
@@ -484,7 +483,7 @@ TEST_F(ClangdVFSTest, MemoryUsage) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   Path FooCpp = testPath("foo.cpp");
   const auto SourceContents = R"cpp(
@@ -520,7 +519,7 @@ TEST_F(ClangdVFSTest, InvalidCompileCommand) {
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
 
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto FooCpp = testPath("foo.cpp");
   // clang cannot create CompilerInvocation if we pass two files in the
@@ -548,7 +547,7 @@ TEST_F(ClangdVFSTest, InvalidCompileCommand) {
 
 class ClangdThreadingTest : public ClangdVFSTest {};
 
-TEST_F(ClangdThreadingTest, StressTest) {
+TEST_F(ClangdThreadingTest, DISABLED_StressTest) {
   // Without 'static' clang gives an error for a usage inside TestDiagConsumer.
   static const unsigned FilesCount = 5;
   const unsigned RequestsCount = 500;
@@ -637,7 +636,7 @@ int d;
   TestDiagConsumer DiagConsumer;
   {
     MockCompilationDatabase CDB;
-    ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+    ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
     // Prepare some random distributions for the test.
     std::random_device RandGen;
@@ -770,7 +769,7 @@ TEST_F(ClangdVFSTest, CheckSourceHeaderSwitch) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto SourceContents = R"cpp(
   #include "foo.h"
@@ -895,7 +894,7 @@ int d;
 
   NoConcurrentAccessDiagConsumer DiagConsumer(std::move(StartSecondPromise));
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
   Server.addDocument(FooCpp, SourceContentsWithErrors);
   StartSecond.wait();
   Server.addDocument(FooCpp, SourceContentsWithoutErrors);
@@ -907,7 +906,7 @@ TEST_F(ClangdVFSTest, FormatCode) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto Path = testPath("foo.cpp");
   std::string Code = R"cpp(
@@ -937,7 +936,7 @@ TEST_F(ClangdVFSTest, ChangedHeaderFromISystem) {
   MockFSProvider FS;
   ErrorCheckingDiagConsumer DiagConsumer;
   MockCompilationDatabase CDB;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), ClangdIndexerOptions());
 
   auto SourcePath = testPath("source/foo.cpp");
   auto HeaderPath = testPath("headers/foo.h");

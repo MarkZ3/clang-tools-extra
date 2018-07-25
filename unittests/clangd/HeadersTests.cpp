@@ -36,7 +36,7 @@ public:
 
 private:
   std::unique_ptr<CompilerInstance> setupClang() {
-    auto Cmd = CDB.getCompileCommand(MainFile);
+    auto Cmd = CDB.getCompileCommand(MainFile, true);
     assert(static_cast<bool>(Cmd));
     auto VFS = FS.getFileSystem();
     VFS->setCurrentWorkingDirectory(Cmd->Directory);
@@ -94,7 +94,7 @@ protected:
     };
 
     IncludeInserter Inserter(MainFile, /*Code=*/"", format::getLLVMStyle(),
-                             CDB.getCompileCommand(MainFile)->Directory,
+                             CDB.getCompileCommand(MainFile, true)->Directory,
                              Clang->getPreprocessor().getHeaderSearchInfo());
     for (const auto &Inc : Inclusions)
       Inserter.addExisting(Inc);
@@ -114,7 +114,7 @@ protected:
         Action.BeginSourceFile(*Clang, Clang->getFrontendOpts().Inputs[0]));
 
     IncludeInserter Inserter(MainFile, /*Code=*/"", format::getLLVMStyle(),
-                             CDB.getCompileCommand(MainFile)->Directory,
+                             CDB.getCompileCommand(MainFile, true)->Directory,
                              Clang->getPreprocessor().getHeaderSearchInfo());
     auto Edit = Inserter.insert(VerbatimHeader);
     Action.EndSourceFile();

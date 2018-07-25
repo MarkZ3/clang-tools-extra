@@ -33,7 +33,7 @@ void ignoreError(llvm::Error Err) {
 class TUSchedulerTests : public ::testing::Test {
 protected:
   ParseInputs getInputs(PathRef File, std::string Contents) {
-    return ParseInputs{*CDB.getCompileCommand(File), buildTestFS(Files),
+    return ParseInputs{*CDB.getCompileCommand(File, true), buildTestFS(Files),
                        std::move(Contents)};
   }
 

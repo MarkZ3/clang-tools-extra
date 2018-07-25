@@ -25,6 +25,7 @@ namespace clangd {
 
 class JSONOutput;
 class SymbolIndex;
+struct ClangdIndexerOptions;
 
 /// This class provides implementation of an LSP server, glueing the JSON
 /// dispatch and ClangdServer together.
@@ -35,7 +36,7 @@ public:
   /// for compile_commands.json in all parent directories of each file.
   ClangdLSPServer(JSONOutput &Out, const clangd::CodeCompleteOptions &CCOpts,
                   llvm::Optional<Path> CompileCommandsDir,
-                  const ClangdServer::Options &Opts);
+                  const ClangdServer::Options &Opts, const ClangdIndexerOptions &IndexerOptions);
 
   /// Run LSP server loop, receiving input for it from \p In. \p In must be
   /// opened in binary mode. Output will be written using Out variable passed to
@@ -55,6 +56,7 @@ private:
   void onShutdown(ShutdownParams &Params) override;
   void onExit(ExitParams &Params) override;
   void onDocumentDidOpen(DidOpenTextDocumentParams &Params) override;
+  void onDocumentDidSave(DidSaveTextDocumentParams &Params) override;
   void onDocumentDidChange(DidChangeTextDocumentParams &Params) override;
   void onDocumentDidClose(DidCloseTextDocumentParams &Params) override;
   void
@@ -75,6 +77,9 @@ private:
   void onRename(RenameParams &Parames) override;
   void onHover(TextDocumentPositionParams &Params) override;
   void onChangeConfiguration(DidChangeConfigurationParams &Params) override;
+  void onReferences(ReferenceParams &Params) override;
+  void onCodeLens(CodeLensParams &Params) override;
+  void onCodeLensResolve(CodeLens &Params) override;
 
   std::vector<Fix> getFixes(StringRef File, const clangd::Diagnostic &D);
 

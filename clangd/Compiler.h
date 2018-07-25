@@ -15,6 +15,7 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANGD_COMPILER_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_COMPILER_H
 
+#include "Path.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/PrecompiledPreamble.h"
@@ -46,6 +47,12 @@ std::unique_ptr<CompilerInstance> prepareCompilerInstance(
     std::unique_ptr<llvm::MemoryBuffer> MainFile,
     std::shared_ptr<PCHContainerOperations>,
     IntrusiveRefCntPtr<vfs::FileSystem>, DiagnosticConsumer &);
+
+std::unique_ptr<CompilerInvocation>
+createCompilerInvocation(PathRef FileName, ArrayRef<const char *> ArgList,
+                         IntrusiveRefCntPtr<DiagnosticsEngine> Diags,
+                         IntrusiveRefCntPtr<vfs::FileSystem> VFS);
+
 
 } // namespace clangd
 } // namespace clang

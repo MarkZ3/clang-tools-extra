@@ -11,6 +11,7 @@ include_directories(
 add_extra_unittest(ClangdTests
   Annotations.cpp
   ClangdTests.cpp
+  ClangdIndexTests.cpp
   ClangdUnitTests.cpp
   CodeCompleteTests.cpp
   CodeCompletionStringsTests.cpp

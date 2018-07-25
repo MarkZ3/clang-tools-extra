@@ -8,16 +8,22 @@
 //===-------------------------------------------------------------------===//
 
 #include "ClangdServer.h"
+#include "ClangdFileUtils.h"
 #include "CodeComplete.h"
 #include "FindSymbols.h"
 #include "Headers.h"
 #include "SourceCode.h"
 #include "XRefs.h"
+#include "index/ClangdIndexDataConsumer.h"
+#include "index/ClangdIndexerImpl.h"
 #include "index/Merge.h"
+
 #include "clang/Format/Format.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Index/IndexingAction.h"
+#include "clang/Index/IndexDataConsumer.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Refactoring/RefactoringResultConsumer.h"
 #include "clang/Tooling/Refactoring/Rename/RenamingAction.h"
@@ -28,6 +34,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Timer.h"
+
 #include <future>
 
 using namespace clang;
@@ -83,7 +91,8 @@ ClangdServer::Options ClangdServer::optsForTest() {
 ClangdServer::ClangdServer(GlobalCompilationDatabase &CDB,
                            FileSystemProvider &FSProvider,
                            DiagnosticsConsumer &DiagConsumer,
-                           const Options &Opts)
+                           const Options &Opts,
+                           const ClangdIndexerOptions &IndexerOptions)
     : CDB(CDB), DiagConsumer(DiagConsumer), FSProvider(FSProvider),
       ResourceDir(Opts.ResourceDir ? Opts.ResourceDir->str()
                                    : getStandardResourceDir()),
@@ -102,7 +111,8 @@ ClangdServer::ClangdServer(GlobalCompilationDatabase &CDB,
                        std::shared_ptr<Preprocessor>
                            PP) { FileIdx->update(Path, &AST, std::move(PP)); }
               : PreambleParsedCallback(),
-          Opts.UpdateDebounce, Opts.RetentionPolicy) {
+          Opts.UpdateDebounce, Opts.RetentionPolicy),
+          IndexerOptions(IndexerOptions) {
   if (FileIdx && Opts.StaticIndex) {
     MergedIndex = mergeIndex(FileIdx.get(), Opts.StaticIndex);
     Index = MergedIndex.get();
@@ -116,14 +126,29 @@ ClangdServer::ClangdServer(GlobalCompilationDatabase &CDB,
 
 void ClangdServer::setRootPath(PathRef RootPath) {
   auto FS = FSProvider.getFileSystem();
-  auto Status = FS->status(RootPath);
+  std::string NewRootPath = llvm::sys::path::convert_to_slash(
+      RootPath, llvm::sys::path::Style::posix);
+  SmallString<256> RootPathRemoveDots = StringRef(NewRootPath);
+  llvm::sys::path::remove_dots(RootPathRemoveDots, true);
+
+  auto Status = FS->status(RootPathRemoveDots);
   if (!Status)
-    log("Failed to get status for RootPath " + RootPath + ": " +
+    log("Failed to get status for RootPath " + RootPathRemoveDots + ": " +
         Status.getError().message());
   else if (Status->isDirectory())
-    this->RootPath = RootPath;
+    this->RootPath = RootPathRemoveDots.str();
   else
     log("The provided RootPath " + RootPath + " is not a directory.");
+
+  if (!this->RootPath)
+    return;
+
+  assert (!Indexer);
+  auto ClangIndexer = std::make_shared<ClangdIndexerImpl>(RootPath.str(), CDB, IndexerOptions);
+  Indexer = ClangIndexer;
+  IndexDataProvider = ClangIndexer;
+  assert(Indexer && IndexDataProvider);
+  Indexer->indexRoot();
 }
 
 void ClangdServer::addDocument(PathRef File, StringRef Contents,
@@ -305,35 +330,15 @@ void ClangdServer::findDefinitions(PathRef File, Position Pos,
                             llvm::Expected<InputsAndAST> InpAST) {
     if (!InpAST)
       return CB(InpAST.takeError());
-    CB(clangd::findDefinitions(InpAST->AST, Pos, Index));
+    CB(clangd::findDefinitions(InpAST->AST, Pos, IndexDataProvider, Index));
   };
 
   WorkScheduler.runWithAST("Definitions", File, Bind(Action, std::move(CB)));
 }
 
 llvm::Optional<Path> ClangdServer::switchSourceHeader(PathRef Path) {
-
-  StringRef SourceExtensions[] = {".cpp", ".c", ".cc", ".cxx",
-                                  ".c++", ".m", ".mm"};
-  StringRef HeaderExtensions[] = {".h", ".hh", ".hpp", ".hxx", ".inc"};
-
-  StringRef PathExt = llvm::sys::path::extension(Path);
-
-  // Lookup in a list of known extensions.
-  auto SourceIter =
-      std::find_if(std::begin(SourceExtensions), std::end(SourceExtensions),
-                   [&PathExt](PathRef SourceExt) {
-                     return SourceExt.equals_lower(PathExt);
-                   });
-  bool IsSource = SourceIter != std::end(SourceExtensions);
-
-  auto HeaderIter =
-      std::find_if(std::begin(HeaderExtensions), std::end(HeaderExtensions),
-                   [&PathExt](PathRef HeaderExt) {
-                     return HeaderExt.equals_lower(PathExt);
-                   });
-
-  bool IsHeader = HeaderIter != std::end(HeaderExtensions);
+  bool IsSource = isSourceFilePath(Path);
+  bool IsHeader = isHeaderFilePath(Path);
 
   // We can only switch between the known extensions.
   if (!IsSource && !IsHeader)
@@ -343,9 +348,9 @@ llvm::Optional<Path> ClangdServer::switchSourceHeader(PathRef Path) {
   // extension was found.
   ArrayRef<StringRef> NewExts;
   if (IsSource)
-    NewExts = HeaderExtensions;
+    NewExts = getHeaderExtensions();
   else
-    NewExts = SourceExtensions;
+    NewExts = getSourceExtensions();
 
   // Storage for the new path.
   SmallString<128> NewPath = StringRef(Path);
@@ -446,12 +451,259 @@ tooling::CompileCommand ClangdServer::getCompileCommand(PathRef File) {
 }
 
 void ClangdServer::onFileEvent(const DidChangeWatchedFilesParams &Params) {
-  // FIXME: Do nothing for now. This will be used for indexing and potentially
-  // invalidating other caches.
+  assert(Indexer);
+  for (const FileEvent &FE : Params.changes) {
+    llvm::errs() << llvm::format(" File event, path: %s, type: %d\n", FE.uri.file().str().c_str(), FE.type);
+    ClangdIndexer::FileChangeType Type;
+    switch (FE.type) {
+     case FileChangeType::Created:
+       Type = ClangdIndexer::FileChangeType::Created;
+       break;
+     case FileChangeType::Changed:
+       Type = ClangdIndexer::FileChangeType::Changed;
+       break;
+     case FileChangeType::Deleted:
+       Type = ClangdIndexer::FileChangeType::Deleted;
+       break;
+    }
+    std::lock_guard<std::recursive_mutex> Lock(IndexMutex);
+    Indexer->onFileEvent( { FE.uri.file(), Type });
+  }
+}
+
+SymbolKind indexSymbolKindToSymbolKind(index::SymbolKind Kind) {
+
+  switch (Kind) {
+  case index::SymbolKind::Unknown:
+    return SymbolKind::Variable;
+  case index::SymbolKind::Module:
+    return SymbolKind::Module;
+  case index::SymbolKind::Namespace:
+    return SymbolKind::Namespace;
+  case index::SymbolKind::NamespaceAlias:
+    return SymbolKind::Namespace;
+  case index::SymbolKind::Macro:
+    // FIXME: Need proper kind for this. See
+    // https://github.com/Microsoft/language-server-protocol/issues/344
+    // https://github.com/Microsoft/language-server-protocol/issues/352
+    return SymbolKind::String;
+  case index::SymbolKind::Enum:
+    return SymbolKind::Enum;
+  case index::SymbolKind::Struct:
+    //FIXME: Not in released protocol. return SymbolKind::Struct;
+    return SymbolKind::Class;
+  case index::SymbolKind::Class:
+    return SymbolKind::Class;
+  case index::SymbolKind::Protocol:
+    // FIXME: Need proper kind for this.
+    return SymbolKind::Interface;
+  case index::SymbolKind::Extension:
+    // FIXME: Need proper kind for this.
+    return SymbolKind::Interface;
+  case index::SymbolKind::Union:
+    // FIXME: Need proper kind for this.
+    return SymbolKind::Class;
+  case index::SymbolKind::TypeAlias:
+    // FIXME: Need proper kind for this.
+    return SymbolKind::Class;
+  case index::SymbolKind::Function:
+    return SymbolKind::Function;
+  case index::SymbolKind::Variable:
+    return SymbolKind::Variable;
+  case index::SymbolKind::Field:
+      return SymbolKind::Field;
+  case index::SymbolKind::EnumConstant:
+      return SymbolKind::Enum;
+      //FIXME: Not in released protocol return SymbolKind::EnumMember;
+  case index::SymbolKind::InstanceMethod:
+  case index::SymbolKind::ClassMethod:
+  case index::SymbolKind::StaticMethod:
+      return SymbolKind::Method;
+  case index::SymbolKind::InstanceProperty:
+  case index::SymbolKind::ClassProperty:
+  case index::SymbolKind::StaticProperty:
+      return SymbolKind::Property;
+  case index::SymbolKind::Constructor:
+  case index::SymbolKind::Destructor:
+      return SymbolKind::Method;
+  case index::SymbolKind::ConversionFunction:
+      return SymbolKind::Function;
+  case index::SymbolKind::Parameter:
+      return SymbolKind::Variable;
+  case index::SymbolKind::Using:
+      // Not sure this is correct.
+      return SymbolKind::Namespace;
+  }
+  llvm_unreachable("invalid symbol kind");
+}
+
+//FIXME: Remove, duplicated from XRefs.cpp
+llvm::Optional<Location> getLocation(SourceManager& SourceMgr, const std::string & File, uint32_t LocStart,
+    uint32_t LocEnd) {
+  const FileEntry *FE = SourceMgr.getFileManager().getFile(File);
+  if (!FE) {
+    return llvm::None;
+  }
+  FileID FID = SourceMgr.getOrCreateFileID(FE, SrcMgr::C_User);
+
+  Position Begin;
+  bool Invalid;
+  Begin.line = SourceMgr.getLineNumber(FID, LocStart, &Invalid) - 1;
+  Begin.character = SourceMgr.getColumnNumber(FID, LocStart, &Invalid) - 1;
+  Position End;
+  End.line = SourceMgr.getLineNumber(FID, LocEnd, &Invalid) - 1;
+  End.character = SourceMgr.getColumnNumber(FID, LocEnd, &Invalid) - 1;
+  Range R = { Begin, End };
+  Location L;
+  L.uri = URIForFile(File);
+  L.range = R;
+  return L;
+}
+
+llvm::Expected<std::vector<SymbolInformation>>
+ClangdServer::onWorkspaceSymbol(StringRef Query) {
+  std::vector<SymbolInformation> Result;
+  if (Query.empty())
+    return Result;
+
+  FileSystemOptions FileOpts;
+  FileManager FM(FileOpts);
+  IntrusiveRefCntPtr<DiagnosticsEngine> DE(CompilerInstance::createDiagnostics(new DiagnosticOptions));
+  SourceManager TempSM(*DE, FM);
+
+  const unsigned int MAX_WORKSPACE_SYMBOLS = 1000;
+  unsigned NumSymbols = 0;
+  IndexDataProvider->foreachSymbols(Query, [&NumSymbols, &Result, &TempSM](ClangdIndexDataSymbol &Sym) {
+    USR Usr(Sym.getUsr());
+    Sym.foreachOccurrence(static_cast<index::SymbolRoleSet>(index::SymbolRole::Definition), [&NumSymbols, &Result, &TempSM, &Sym](ClangdIndexDataOccurrence &Occurrence) {
+      auto L = getLocation(TempSM, Occurrence.getPath(), Occurrence.getStartOffset(TempSM), Occurrence.getEndOffset(TempSM));
+      if (L) {
+        Result.push_back({Sym.getName(), indexSymbolKindToSymbolKind(Sym.getKind()), *L, Sym.getQualifier()});
+        NumSymbols++;
+        if (NumSymbols >= MAX_WORKSPACE_SYMBOLS)
+          return false;
+      }
+      return true;
+    });
+    if (NumSymbols >= MAX_WORKSPACE_SYMBOLS)
+      return false;
+    return true;
+  });
+
+  llvm::errs() << llvm::format("Found %u symbols.\n", Result.size());
+  return Result;
+}
+
+void ClangdServer::findReferences(
+    PathRef File, Position Pos, bool IncludeDeclaration,
+    Callback<std::vector<Location>> CB) {
+  auto FS = FSProvider.getFileSystem();
+  auto Action = [this, Pos, FS, IncludeDeclaration](Callback<std::vector<Location>> CB,
+                          llvm::Expected<InputsAndAST> InpAST) {
+    if (!InpAST)
+      return CB(InpAST.takeError());
+    std::vector<Location> Result;
+    {
+      std::lock_guard<std::recursive_mutex> Lock(IndexMutex);
+      auto IndexTotalTimer = llvm::Timer("index time", "Find References Time");
+      IndexTotalTimer.startTimer();
+      Result = clangd::findReferences(InpAST->AST, Pos, IncludeDeclaration, IndexDataProvider);
+      IndexTotalTimer.stopTimer();
+      llvm::errs() << llvm::format("Found %u references.\n", Result.size());
+    }
+    CB(Result);
+  };
+
+  WorkScheduler.runWithAST("Definitions", File, Bind(Action, std::move(CB)));
+}
+
+void ClangdServer::codeLens(
+    PathRef File,
+    Callback<std::vector<CodeLens>> CB) {
+  auto FS = FSProvider.getFileSystem();
+  auto Action = [this, FS](Callback<std::vector<CodeLens>> CB,
+                          llvm::Expected<InputsAndAST> InpAST) {
+    if (!InpAST)
+      return CB(InpAST.takeError());
+    std::vector<CodeLens> Result = clangd::codeLens(InpAST->AST, IndexDataProvider);
+    CB(Result);
+  };
+
+  WorkScheduler.runWithAST("CodeLens", File, Bind(Action, std::move(CB)));
+}
+
+void ClangdServer::codeLensResolve(
+    const CodeLens &CL,
+    Callback<CodeLens> CB) {
+  auto FS = FSProvider.getFileSystem();
+  auto Action = [this, CL, FS](Callback<CodeLens> CB,
+                          llvm::Expected<InputsAndAST> InpAST) {
+    if (!InpAST)
+      return CB(InpAST.takeError());
+    CodeLens Result = clangd::codeLensResolve(InpAST->AST, CL, IndexDataProvider);
+    CB(Result);
+  };
+
+  WorkScheduler.runWithAST("CodeLensResolve", CL.data.loc.uri.file(), Bind(Action, std::move(CB)));
+}
+
+void ClangdServer::reindex() {
+  if (!RootPath)
+    return;
+
+  assert(Indexer);
+  std::lock_guard<std::recursive_mutex> Lock(IndexMutex);
+  Indexer->reindex();
+}
+
+void ClangdServer::dumpIncludedBy(URIForFile File) {
+  std::lock_guard<std::recursive_mutex> Lock(IndexMutex);
+  assert(Indexer);
+  IndexDataProvider->dumpIncludedBy(File.file());
+}
+
+void ClangdServer::dumpInclusions(URIForFile File) {
+  std::lock_guard<std::recursive_mutex> Lock(IndexMutex);
+  assert(Indexer);
+  IndexDataProvider->dumpInclusions(File.file());
 }
 
 void ClangdServer::workspaceSymbols(
     StringRef Query, int Limit, Callback<std::vector<SymbolInformation>> CB) {
+
+  if (IndexDataProvider) {
+    std::vector<SymbolInformation> Result;
+    if (Query.empty())
+      return CB(Result);
+
+    FileSystemOptions FileOpts;
+    FileManager FM(FileOpts);
+    IntrusiveRefCntPtr<DiagnosticsEngine> DE(CompilerInstance::createDiagnostics(new DiagnosticOptions));
+    SourceManager TempSM(*DE, FM);
+
+    int NumSymbols = 0;
+    IndexDataProvider->foreachSymbols(Query, [&NumSymbols, Limit, &Result, &TempSM](ClangdIndexDataSymbol &Sym) {
+      USR Usr(Sym.getUsr());
+      Sym.foreachOccurrence(static_cast<index::SymbolRoleSet>(index::SymbolRole::Definition), [&NumSymbols, Limit, &Result, &TempSM, &Sym](ClangdIndexDataOccurrence &Occurrence) {
+        auto L = getLocation(TempSM, Occurrence.getPath(), Occurrence.getStartOffset(TempSM), Occurrence.getEndOffset(TempSM));
+        if (L) {
+          Result.push_back({Sym.getName(), indexSymbolKindToSymbolKind(Sym.getKind()), *L, Sym.getQualifier()});
+          NumSymbols++;
+          if (NumSymbols >= Limit)
+            return false;
+        }
+        return true;
+      });
+      if (NumSymbols >= Limit)
+        return false;
+      return true;
+    });
+
+    llvm::errs() << llvm::format("Found %u symbols.\n", Result.size());
+    CB(Result);
+    return;
+  }
+
   CB(clangd::getWorkspaceSymbols(Query, Limit, Index,
                                  RootPath ? *RootPath : ""));
 }
@@ -476,4 +728,13 @@ ClangdServer::getUsedBytesPerFile() const {
 LLVM_NODISCARD bool
 ClangdServer::blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds) {
   return WorkScheduler.blockUntilIdle(timeoutSeconds(TimeoutSeconds));
+}
+
+void ClangdServer::printStats() {
+  if (!RootPath)
+    return;
+
+  assert(Indexer);
+  std::lock_guard<std::recursive_mutex> Lock(IndexMutex);
+  Indexer->printStats();
 }

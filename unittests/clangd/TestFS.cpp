@@ -36,7 +36,7 @@ MockCompilationDatabase::MockCompilationDatabase(bool UseRelPaths)
 }
 
 Optional<tooling::CompileCommand>
-MockCompilationDatabase::getCompileCommand(PathRef File) const {
+MockCompilationDatabase::getCompileCommand(PathRef File, bool) const {
   if (ExtraClangFlags.empty())
     return None;
 

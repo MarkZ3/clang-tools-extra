@@ -9,6 +9,7 @@ endif()
 
 add_clang_library(clangDaemon
   AST.cpp
+  ClangdFileUtils.cpp
   ClangdLSPServer.cpp
   ClangdServer.cpp
   ClangdUnit.cpp
@@ -36,6 +37,12 @@ add_clang_library(clangDaemon
   XRefs.cpp
   index/CanonicalIncludes.cpp
   index/FileIndex.cpp
+  index/BTree.cpp
+  index/ClangdIndex.cpp
+  index/ClangdIndexerImpl.cpp
+  index/ClangdIndexDataPiece.cpp
+  index/ClangdIndexDataStorage.cpp
+  index/ClangdIndexString.cpp
   index/Index.cpp
   index/MemIndex.cpp
   index/Merge.cpp

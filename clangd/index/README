@@ -1,0 +1,40 @@
+#How indexing works
+
+The server has a root URI for the workspace. Every source file under the workspace is indexed, depending on the extension (.cpp, .c, etc). When a file is indexed, #include directives are tracked in order to build a dependency graph between the files. An "indexer action" handles every occurrence of symbols in a source file and stores function definitions.
+
+##How data is stored
+
+Each file is represented by a ClangdIndexFile. Files are inserted in a BTree for fast lookup, by file name.
+Each symbol definition is a ClangdIndexSymbol. Symbols are inserted in another BTree for fast lookup, by USR (Unified Symbol Resolution).
+ClangdIndexOccurrences represent the occurrences of symbols (ClangdIndexSymbol). It has different "role" flags: declaration, definition, reference, etc.
+ClangdIndexSymbol has a linked list of its occurrences. This is how "Find References" can list all references and open "Open Definition" finds the definition.
+Each ClangdIndexFile "owns" a linked list of occurrences in the file. When a file is modified or deleted, its occurrences are deleted then re-added (if necessary) when reindexed. If there are no more occurrences for a given symbol, the symbol is deleted.
+ClangdIndexHeaderInclusion stores the inclusion relationships between files (ClangdIndexFile).
+
+Data is allocated and stored on disk via ClangdIndexDataStorage, a utility that provides a malloc-like interface for writing data to a file.
+
+## What works
+- File dependency tracking (inclusions, included-by).
+- An index of symbols, their occurrences and locations.
+- Reacting to (workspace) file events.
+- A command to reindex (for testing purposes?)
+- A command to dump header inclusions (for testing purposes). Could be the basis for "Include browser" functionality.
+- A command to dump "included by" files (for testing purposes). Could be the basis for "Include browser" functionality.
+- The data storage code (ClangdIndexDataStorage and BTree) are commented and pretty tested.
+- Re-indexing dependent files.
+- Open Definition.
+- Find References.
+- CodeLens (references).
+- Open Workspace Symbol. Only by non-qualified name for now.
+- Using the file dependency information to find a suitable compilation database when opening a header.
+
+## What doesn't work/Left to do
+A lot!
+- Open Workspace Symbol, searching by qualified name and wildcards.
+- Reacting to external file events, such as system header changes.
+- Multiple symbol kinds for the same USRs is not supported.
+- Tracking file content hash (to prevent re-indexing generated files on restart, etc).
+- Some task/scheduling system for indexing multiple files at the same time.
+- Tests for file events and the indexer reacting to them.
+- Many indexing related features are missing!
+- Possibly replace ClangdIndexDataStorage and BTree with libLMDB.

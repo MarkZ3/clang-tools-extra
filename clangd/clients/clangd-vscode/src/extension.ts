@@ -52,6 +52,25 @@ export function activate(context: vscode.ExtensionContext) {
     };
 
     const clangdClient = new vscodelc.LanguageClient('Clang Language Server', serverOptions, clientOptions);
+    clangdClient.trace = vscodejsonrpc.Trace.Verbose;
+
+    function applyTextEdits(uri: string, edits: vscodelc.TextEdit[]) {
+        let textEditor = vscode.window.activeTextEditor;
+
+        // FIXME: vscode expects that uri will be percent encoded
+        if (textEditor && textEditor.document.uri.toString(true) === uri) {
+            textEditor.edit(mutator => {
+                for (const edit of edits) {
+                    mutator.replace(clangdClient.protocol2CodeConverter.asRange(edit.range), edit.newText);
+                }
+            }).then((success) => {
+                if (!success) {
+                    vscode.window.showErrorMessage('Failed to apply fixes to the document.');
+                }
+            });
+        }
+    }
+
     console.log('Clang Language Server is now active!');
 
     const disposable = clangdClient.start();

@@ -50,7 +50,7 @@ ClangdServer::Options optsForTests() {
 class WorkspaceSymbolsTest : public ::testing::Test {
 public:
   WorkspaceSymbolsTest()
-      : Server(CDB, FSProvider, DiagConsumer, optsForTests()) {
+      : Server(CDB, FSProvider, DiagConsumer, optsForTests(), ClangdIndexerOptions()) {
     // Make sure the test root directory is created.
     FSProvider.Files[testPath("unused")] = "";
     Server.setRootPath(testRoot());
@@ -293,7 +293,7 @@ namespace {
 class DocumentSymbolsTest : public ::testing::Test {
 public:
   DocumentSymbolsTest()
-      : Server(CDB, FSProvider, DiagConsumer, optsForTests()) {}
+      : Server(CDB, FSProvider, DiagConsumer, optsForTests(), ClangdIndexerOptions()) {}
 
 protected:
   MockFSProvider FSProvider;

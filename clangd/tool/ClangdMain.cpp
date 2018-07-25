@@ -11,6 +11,7 @@
 #include "JSONRPCDispatcher.h"
 #include "Path.h"
 #include "Trace.h"
+#include "index/ClangdIndexer.h"
 #include "index/SymbolYAML.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
@@ -149,6 +150,12 @@ static llvm::cl::opt<bool>
                 llvm::cl::init(clangd::CodeCompleteOptions().ShowOrigins),
                 llvm::cl::Hidden);
 
+static llvm::cl::opt<bool> IndexCDBFilesOnly(
+    "index-compilation-database-files-only",
+    llvm::cl::desc("Only index source files with an entry in the compilation "
+                   "database (compile_commands.json)."),
+    llvm::cl::init(true));
+
 static llvm::cl::opt<Path> YamlSymbolFile(
     "yaml-symbol-file",
     llvm::cl::desc(
@@ -269,8 +276,11 @@ int main(int argc, char *argv[]) {
   CCOpts.BundleOverloads = CompletionStyle != Detailed;
   CCOpts.ShowOrigins = ShowOrigins;
 
+  clangd::ClangdIndexerOptions IndexerOptions;
+  IndexerOptions.IncludeCDBFilesOnly = IndexCDBFilesOnly;
+
   // Initialize and run ClangdLSPServer.
-  ClangdLSPServer LSPServer(Out, CCOpts, CompileCommandsDirPath, Opts);
+  ClangdLSPServer LSPServer(Out, CCOpts, CompileCommandsDirPath, Opts, IndexerOptions);
   constexpr int NoShutdownRequestErrorCode = 1;
   llvm::set_thread_name("clangd.main");
   // Change stdin to binary to not lose \r\n on windows.

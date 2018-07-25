@@ -44,7 +44,7 @@ public:
   MockCompilationDatabase(bool UseRelPaths = false);
 
   llvm::Optional<tooling::CompileCommand>
-  getCompileCommand(PathRef File) const override;
+  getCompileCommand(PathRef File, bool InferMissing) const override;
 
   std::vector<std::string> ExtraClangFlags;
   const bool UseRelPaths;

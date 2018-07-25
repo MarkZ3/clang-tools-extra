@@ -119,6 +119,12 @@ void ClangdLSPServer::onInitialize(InitializeParams &Params) {
              json::Object{
                  {"commands", {ExecuteCommandParams::CLANGD_APPLY_FIX_COMMAND}},
              }},
+            {"referencesProvider", true},
+            {"workspaceSymbolProvider", true},
+            {"codeLensProvider",
+             json::Object{
+                 {"resolveProvider", true}
+            }},
         }}}});
 }
 
@@ -171,6 +177,15 @@ void ClangdLSPServer::onFileEvent(DidChangeWatchedFilesParams &Params) {
   Server.onFileEvent(Params);
 }
 
+void ClangdLSPServer::onDocumentDidSave(DidSaveTextDocumentParams &Params) {
+  FileEvent FE;
+  FE.uri = Params.textDocument.uri;
+  FE.type = FileChangeType::Changed;
+  DidChangeWatchedFilesParams P;
+  P.changes = {FE};
+  Server.onFileEvent(P);
+}
+
 void ClangdLSPServer::onCommand(ExecuteCommandParams &Params) {
   auto ApplyEdit = [](WorkspaceEdit WE) {
     ApplyWorkspaceEditParams Edit;
@@ -193,6 +208,14 @@ void ClangdLSPServer::onCommand(ExecuteCommandParams &Params) {
 
     reply("Fix applied.");
     ApplyEdit(*Params.workspaceEdit);
+  } else if (Params.command == ExecuteCommandParams::CLANGD_REINDEX_COMMAND) {
+    Server.reindex();
+  } else if (Params.command == ExecuteCommandParams::CLANGD_DUMPINCLUDEDBY_COMMAND && Params.textDocument) {
+    Server.dumpIncludedBy(Params.textDocument->uri);
+  } else if (Params.command == ExecuteCommandParams::CLANGD_DUMPINCLUSIONS_COMMAND && Params.textDocument) {
+    Server.dumpInclusions(Params.textDocument->uri);
+  } else if (Params.command == ExecuteCommandParams::CLANGD_PRINTSTATS_COMMAND) {
+    Server.printStats();
   } else {
     // We should not get here because ExecuteCommandParams would not have
     // parsed in the first place and this handler should not be called. But if
@@ -413,13 +436,46 @@ void ClangdLSPServer::onChangeConfiguration(
   }
 }
 
+void ClangdLSPServer::onReferences(ReferenceParams &Params) {
+  Server.findReferences(
+      Params.textDocument.uri.file(), Params.position, Params.context.includeDeclaration,
+      [](llvm::Expected<std::vector<Location>> Items) {
+        if (!Items)
+          return replyError(ErrorCode::InvalidParams,
+                            llvm::toString(Items.takeError()));
+        reply(json::Array(*Items));
+      });
+}
+
+void ClangdLSPServer::onCodeLens(CodeLensParams &Params) {
+  Server.codeLens(
+      Params.textDocument.uri.file(),
+      [](llvm::Expected<std::vector<CodeLens>> Items) {
+        if (!Items)
+          return replyError(ErrorCode::InvalidParams,
+                            llvm::toString(Items.takeError()));
+        reply(json::Array(*Items));
+      });
+}
+
+void ClangdLSPServer::onCodeLensResolve(CodeLens &Params) {
+  Server.codeLensResolve(Params,
+      [](llvm::Expected<CodeLens> CL) {
+        if (!CL)
+          return replyError(ErrorCode::InvalidParams,
+                            llvm::toString(CL.takeError()));
+        reply(*CL);
+      });
+}
+
 ClangdLSPServer::ClangdLSPServer(JSONOutput &Out,
                                  const clangd::CodeCompleteOptions &CCOpts,
                                  llvm::Optional<Path> CompileCommandsDir,
-                                 const ClangdServer::Options &Opts)
+                                 const ClangdServer::Options &Opts,
+                                 const ClangdIndexerOptions &IndexerOptions)
     : Out(Out), NonCachedCDB(std::move(CompileCommandsDir)), CDB(NonCachedCDB),
       CCOpts(CCOpts), SupportedSymbolKinds(defaultSymbolKinds()),
-      Server(CDB, FSProvider, /*DiagConsumer=*/*this, Opts) {}
+      Server(CDB, FSProvider, /*DiagConsumer=*/*this, Opts, IndexerOptions) {}
 
 bool ClangdLSPServer::run(std::FILE *In, JSONStreamStyle InputStyle) {
   assert(!IsDone && "Run was called before");

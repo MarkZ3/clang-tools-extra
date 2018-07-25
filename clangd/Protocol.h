@@ -366,6 +366,12 @@ struct DidCloseTextDocumentParams {
 };
 bool fromJSON(const llvm::json::Value &, DidCloseTextDocumentParams &);
 
+struct DidSaveTextDocumentParams {
+  /// The document that was closed.
+  TextDocumentIdentifier textDocument;
+};
+bool fromJSON(const llvm::json::Value &, DidSaveTextDocumentParams &);
+
 struct TextDocumentContentChangeEvent {
   /// The range of the document that changed.
   llvm::Optional<Range> range;
@@ -558,20 +564,58 @@ llvm::json::Value toJSON(const WorkspaceEdit &WE);
 struct ExecuteCommandParams {
   // Command to apply fix-its. Uses WorkspaceEdit as argument.
   const static llvm::StringLiteral CLANGD_APPLY_FIX_COMMAND;
+  // Server to client only.
+  const static llvm::StringLiteral CLANGD_REFERENCES;
+  // Indexing stuff
+  const static llvm::StringLiteral CLANGD_REINDEX_COMMAND;
+  const static llvm::StringLiteral CLANGD_DUMPINCLUDEDBY_COMMAND;
+  const static llvm::StringLiteral CLANGD_DUMPINCLUSIONS_COMMAND;
+  const static llvm::StringLiteral CLANGD_PRINTSTATS_COMMAND;
 
   /// The command identifier, e.g. CLANGD_APPLY_FIX_COMMAND
   std::string command;
 
   // Arguments
   llvm::Optional<WorkspaceEdit> workspaceEdit;
+  llvm::Optional<TextDocumentIdentifier> textDocument;
+  llvm::Optional<Position> position;
+  llvm::Optional<std::vector<Location>> locations;
 };
 bool fromJSON(const llvm::json::Value &, ExecuteCommandParams &);
+
+struct CodeLensParams {
+  /// The document to request code lens for.
+  TextDocumentIdentifier textDocument;
+};
+bool fromJSON(const llvm::json::Value &, CodeLensParams &);
 
 struct Command : public ExecuteCommandParams {
   std::string title;
 };
 
 llvm::json::Value toJSON(const Command &C);
+bool fromJSON(const llvm::json::Value &, Command &);
+
+//Note: this is Clangd-specific.
+struct CodeLensData {
+  Location loc;
+};
+bool fromJSON(const llvm::json::Value &, CodeLensData &);
+llvm::json::Value toJSON(const CodeLensData &);
+
+struct CodeLens {
+  /// The range in which this code lens is valid. Should only span a single line.
+  Range range;
+
+  /// The command this code lens represents.
+  llvm::Optional<Command> command;
+
+  /// This is passed to codeLensResolve so that is has all the information it
+  /// needs to resolve the lens.
+  CodeLensData data;
+};
+bool fromJSON(const llvm::json::Value &, CodeLens &);
+llvm::json::Value toJSON(const CodeLens &);
 
 /// Represents information about programming constructs like variables, classes,
 /// interfaces etc.
@@ -632,6 +676,17 @@ struct Hover {
   llvm::Optional<Range> range;
 };
 llvm::json::Value toJSON(const Hover &H);
+
+struct ReferenceContext {
+  /// Include the declaration of the current symbol.
+  bool includeDeclaration;
+};
+bool fromJSON(const llvm::json::Value &Params, ReferenceContext &R);
+
+struct ReferenceParams : public TextDocumentPositionParams {
+  ReferenceContext context;
+};
+bool fromJSON(const llvm::json::Value &Params, ReferenceParams &R);
 
 /// The kind of a completion entry.
 enum class CompletionItemKind {

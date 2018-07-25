@@ -104,7 +104,8 @@ CodeCompleteResult completions(StringRef Text,
   MockFSProvider FS;
   MockCompilationDatabase CDB;
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
   return completions(Server, Text, std::move(IndexSymbols), std::move(Opts));
 }
 
@@ -544,7 +545,8 @@ TEST(CompletionTest, IncludeInsertionPreprocessorIntegrationTests) {
   FS.Files[BarHeader] = "";
 
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
   Symbol::Details Scratch;
   auto BarURI = URI::createFile(BarHeader).toString();
   Symbol Sym = cls("ns::X");
@@ -575,7 +577,8 @@ TEST(CompletionTest, NoIncludeInsertionWhenDeclFoundInFile) {
   MockCompilationDatabase CDB;
 
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
   Symbol::Details Scratch;
   Symbol SymX = cls("ns::X");
   Symbol SymY = cls("ns::Y");
@@ -605,7 +608,8 @@ TEST(CompletionTest, IndexSuppressesPreambleCompletions) {
   MockFSProvider FS;
   MockCompilationDatabase CDB;
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
 
   FS.Files[testPath("bar.h")] =
       R"cpp(namespace ns { struct preamble { int member; }; })cpp";
@@ -641,7 +645,8 @@ TEST(CompletionTest, DynamicIndexMultiFile) {
   IgnoreDiagnostics DiagConsumer;
   auto Opts = ClangdServer::optsForTest();
   Opts.BuildDynamicSymbolIndex = true;
-  ClangdServer Server(CDB, FS, DiagConsumer, Opts);
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, Opts, IndexerOpts);
 
   FS.Files[testPath("foo.h")] = R"cpp(
       namespace ns { class XYZ {}; void foo(int x) {} }
@@ -807,7 +812,8 @@ SignatureHelp signatures(StringRef Text) {
   MockFSProvider FS;
   MockCompilationDatabase CDB;
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
   auto File = testPath("foo.cpp");
   Annotations Test(Text);
   runAddDocument(Server, File, Test.code());
@@ -1119,7 +1125,8 @@ TEST(CompletionTest, DocumentationFromChangedFileCrash) {
 
   MockCompilationDatabase CDB;
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
 
   Annotations Source(R"cpp(
     #include "foo.h"
@@ -1154,7 +1161,8 @@ TEST(CompletionTest, NonDocComments) {
 
   MockCompilationDatabase CDB;
   IgnoreDiagnostics DiagConsumer;
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
 
   Annotations Source(R"cpp(
     // We ignore namespace comments, for rationale see CodeCompletionStrings.h.
@@ -1221,8 +1229,8 @@ TEST(CompletionTest, CompleteOnInvalidLine) {
   IgnoreDiagnostics DiagConsumer;
   MockFSProvider FS;
   FS.Files[FooCpp] = "// empty file";
-
-  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest());
+  ClangdIndexerOptions IndexerOpts;
+  ClangdServer Server(CDB, FS, DiagConsumer, ClangdServer::optsForTest(), IndexerOpts);
   // Run completion outside the file range.
   Position Pos;
   Pos.line = 100;
